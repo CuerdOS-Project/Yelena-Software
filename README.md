@@ -71,11 +71,3 @@ Yelena Software se distribuye bajo la **GNU General Public License v3.0**. Consu
 Los componentes de terceros mantienen sus propias licencias. XBPS se distribuye bajo una licencia BSD simplificada de dos cláusulas, mientras que PySide6 y Qt for Python utilizan las licencias comunitarias de Qt, incluyendo LGPLv3 y GPLv3.[1] [2]
 
 No redistribuyas iconos, traducciones, fuentes u otros recursos de terceros sin revisar sus avisos de copyright y sus condiciones de uso.
-
-## Referencias
-
-[1]: https://docs.voidlinux.org/xbps/index.html "XBPS Package Manager - Void Linux Handbook"
-
-[2]: https://doc.qt.io/qtforpython-6/commercial/index.html "Qt for Python - Licensing"
-
-[3]: https://github.com/void-linux/xbps "Repositorio oficial de XBPS"
