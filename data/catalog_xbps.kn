@@ -1,0 +1,1360 @@
+# ============================================================
+# Yelena Software — Catálogo XBPS (Void Linux)
+# ============================================================
+# Paquetes disponibles en los repositorios oficiales de Void Linux.
+# Versiones sincronizadas con los templates de void-packages
+# (repo-fi.voidlinux.org / github.com/void-linux/void-packages) — 2026-07.
+# ============================================================
+
+# ── INTERNET ─────────────────────────────────────────────────
+
+[app]
+id = xbps:firefox
+name = Firefox
+summary = Navegador web rápido, privado y seguro
+summary_en = Fast, private & safe web browser
+category = Internet
+source = xbps
+icon = firefox
+version = 152.0.4
+size_bytes = 262144000
+featured = true
+---
+
+[app]
+id = xbps:vivaldi
+name = Vivaldi
+summary = Navegador web avanzado con bloqueo de rastreadores potente y flexible
+summary_en = Powerful, personal and private web browser
+category = Internet
+source = xbps
+icon = vivaldi
+version = 8.0.4033.50
+size_bytes = 262144000
+featured = true
+top_app = true
+---
+
+[app]
+id = xbps:chromium
+name = Chromium
+summary = Navegador web de código abierto de Google
+summary_en = Open-source web browser by Google
+category = Internet
+source = xbps
+icon = chromium
+version = 150.0.7871.46
+size_bytes = 209715200
+---
+
+[app]
+id = xbps:thunderbird
+name = Thunderbird
+summary = Cliente de correo y agenda de Mozilla
+summary_en = Mozilla email and calendar client
+category = Internet
+source = xbps
+icon = thunderbird
+version = 140.8.1
+size_bytes = 83886080
+---
+
+[app]
+id = xbps:telegram-desktop
+name = Telegram
+summary = Mensajería rápida y segura
+summary_en = Fast and secure messaging
+category = Internet
+source = xbps
+icon = telegram
+version = 6.8.2
+size_bytes = 62914560
+---
+
+[app]
+id = xbps:Signal-Desktop
+name = Signal
+summary = Mensajería privada cifrada de extremo a extremo
+summary_en = Private end-to-end encrypted messaging
+category = Internet
+source = xbps
+icon = signal-desktop
+version = 8.11.0
+size_bytes = 209715200
+---
+
+[app]
+id = xbps:transmission-gtk
+name = Transmission
+summary = Cliente BitTorrent rápido, fácil y ligero
+summary_en = Fast, easy, and free BitTorrent client
+category = Internet
+source = xbps
+icon = transmission
+version = 4.1.3
+size_bytes = 4194304
+---
+
+[app]
+id = xbps:qbittorrent
+name = qBittorrent
+summary = Cliente BitTorrent avanzado y sin anuncios basado en Qt
+summary_en = Advanced and ad-free BitTorrent client
+category = Internet
+source = xbps
+icon = qbittorrent
+version = 5.2.2
+size_bytes = 25165824
+---
+
+[app]
+id = xbps:deluge
+name = Deluge
+summary = Cliente BitTorrent ligero y configurable
+summary_en = Lightweight and configurable BitTorrent client
+category = Internet
+source = xbps
+icon = deluge
+version = 2.2.0
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:hexchat
+name = HexChat
+summary = Cliente IRC de código abierto basado en XChat
+summary_en = Open-source IRC client based on XChat
+category = Internet
+source = xbps
+icon = hexchat
+version = 2.16.2
+size_bytes = 6291456
+---
+
+[app]
+id = xbps:weechat
+name = WeeChat
+summary = Cliente IRC modular y extensible para terminal
+summary_en = Modular and extensible IRC client for terminal
+category = Internet
+source = xbps
+icon = utilities-terminal
+version = 4.9.2
+size_bytes = 4194304
+---
+
+[app]
+id = xbps:filezilla
+name = FileZilla
+summary = Cliente FTP, FTPS y SFTP multiplataforma
+summary_en = Cross-platform FTP, FTPS and SFTP client
+category = Internet
+source = xbps
+icon = filezilla
+version = 3.69.3
+size_bytes = 31457280
+---
+
+[app]
+id = xbps:remmina
+name = Remmina
+summary = Cliente de escritorio remoto para GNOME
+summary_en = Remote desktop client for GNOME
+category = Internet
+source = xbps
+icon = org.remmina.Remmina
+version = 1.4.43
+size_bytes = 15728640
+---
+
+# ── MULTIMEDIA ────────────────────────────────────────────────
+
+[app]
+id = xbps:vlc
+name = VLC
+summary = Reproductor multimedia libre y de código abierto
+summary_en = Free and open source media player
+category = Multimedia
+source = xbps
+icon = vlc
+version = 3.0.23
+size_bytes = 73400320
+top_app = true
+---
+
+[app]
+id = xbps:mpv
+name = mpv
+summary = Reproductor multimedia minimalista basado en FFmpeg
+summary_en = Minimalist media player based on FFmpeg
+category = Multimedia
+source = xbps
+icon = mpv
+version = 0.41.0
+size_bytes = 12582912
+---
+
+[app]
+id = xbps:celluloid
+name = Celluloid
+summary = Interfaz gráfica simple para mpv
+summary_en = Simple GTK+ frontend for mpv
+category = Multimedia
+source = xbps
+icon = io.github.celluloid_player.Celluloid
+version = 0.30
+size_bytes = 3145728
+---
+
+[app]
+id = xbps:obs
+name = OBS Studio
+summary = Transmisión en vivo y grabación de pantalla
+summary_en = Live streaming and screen recording
+category = Multimedia
+source = xbps
+icon = com.obsproject.Studio
+version = 32.1.2
+size_bytes = 167772160
+featured = true
+---
+
+[app]
+id = xbps:kdenlive
+name = Kdenlive
+summary = Editor de video no lineal para KDE
+summary_en = KDE non-linear video editor
+category = Multimedia
+source = xbps
+icon = org.kde.kdenlive
+version = 26.04.1
+size_bytes = 367001600
+---
+
+[app]
+id = xbps:shotcut
+name = Shotcut
+summary = Editor de video multiplataforma gratuito y de código abierto
+summary_en = Free, open source, cross-platform video editor
+category = Multimedia
+source = xbps
+icon = org.shotcut.Shotcut
+version = 26.6.25
+size_bytes = 104857600
+---
+
+[app]
+id = xbps:handbrake
+name = HandBrake
+summary = Transcodificador de video de código abierto
+summary_en = Open source video transcoder
+category = Multimedia
+source = xbps
+icon = fr.handbrake.ghb
+version = 1.11.0
+size_bytes = 52428800
+---
+
+[app]
+id = xbps:audacity
+name = Audacity
+summary = Editor de audio multipista gratuito y de código abierto
+summary_en = Free, open source, cross-platform audio software
+category = Multimedia
+source = xbps
+icon = audacity
+version = 3.7.8
+size_bytes = 31457280
+---
+
+[app]
+id = xbps:strawberry
+name = Strawberry
+summary = Reproductor de música y organizador de colecciones
+summary_en = Music player and collection organizer
+category = Multimedia
+source = xbps
+icon = org.strawberrymusicplayer.strawberry
+version = 1.2.20
+size_bytes = 15728640
+---
+
+[app]
+id = xbps:rhythmbox
+name = Rhythmbox
+summary = Reproductor de música para GNOME
+summary_en = Music player for GNOME
+category = Multimedia
+source = xbps
+icon = rhythmbox
+version = 3.4.9
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:lollypop
+name = Lollypop
+summary = Reproductor de música moderno para GNOME
+summary_en = Modern music player for GNOME
+category = Multimedia
+source = xbps
+icon = org.gnome.Lollypop
+version = 1.4.45
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:yt-dlp
+name = yt-dlp
+summary = Descargador de video desde YouTube y más de 1000 sitios
+summary_en = Video downloader for YouTube and 1000+ sites
+category = Multimedia
+source = xbps
+icon = applications-multimedia
+version = 2026.07.04
+size_bytes = 2097152
+---
+
+
+# ── GRAPHICS ─────────────────────────────────────────────────
+
+[app]
+id = xbps:gimp
+name = GIMP
+summary = Programa GNU de manipulación de imágenes
+summary_en = GNU Image Manipulation Program
+category = Graphics
+source = xbps
+icon = gimp
+version = 3.2.4
+size_bytes = 209715200
+featured = true
+---
+
+[app]
+id = xbps:inkscape
+name = Inkscape
+summary = Editor de gráficos vectoriales
+summary_en = Vector graphics editor
+category = Graphics
+source = xbps
+icon = inkscape
+version = 1.4.3
+size_bytes = 157286400
+---
+
+[app]
+id = xbps:krita
+name = Krita
+summary = Pintura digital y arte
+summary_en = Digital painting & art
+category = Graphics
+source = xbps
+icon = krita
+version = 5.2.14
+size_bytes = 293601280
+---
+
+[app]
+id = xbps:blender
+name = Blender
+summary = Suite de creación 3D
+summary_en = 3D creation suite
+category = Graphics
+source = xbps
+icon = blender
+version = 5.0.0
+size_bytes = 576716800
+---
+
+[app]
+id = xbps:darktable
+name = Darktable
+summary = Flujo de trabajo fotográfico y revelado RAW
+summary_en = Photography workflow and RAW photo editor
+category = Graphics
+source = xbps
+icon = darktable
+version = 5.4.0
+size_bytes = 104857600
+---
+
+[app]
+id = xbps:rawtherapee
+name = RawTherapee
+summary = Procesador de imágenes RAW avanzado
+summary_en = Advanced RAW image processor
+category = Graphics
+source = xbps
+icon = rawtherapee
+version = 5.12
+size_bytes = 52428800
+---
+
+[app]
+id = xbps:shotwell
+name = Shotwell
+summary = Gestor y visor de fotos para GNOME
+summary_en = Photo manager and viewer for GNOME
+category = Graphics
+source = xbps
+icon = shotwell
+version = 0.32.13
+size_bytes = 20971520
+---
+
+[app]
+id = xbps:gthumb
+name = gThumb
+summary = Visor de imágenes y explorador de fotos para GNOME
+summary_en = Image viewer and photo browser for GNOME
+category = Graphics
+source = xbps
+icon = org.gnome.gThumb
+version = 3.12.8.2
+size_bytes = 10485760
+---
+
+
+# ── DEVELOPMENT ──────────────────────────────────────────────
+
+[app]
+id = xbps:neovim
+name = Neovim
+summary = Editor basado en Vim hiperextensible
+summary_en = Hyper-extensible Vim-based editor
+category = Development
+source = xbps
+icon = gvim
+version = 0.12.3
+size_bytes = 15728640
+---
+
+[app]
+id = xbps:emacs
+name = GNU Emacs
+summary = Editor de texto extensible, personalizable y autodocumentado
+summary_en = Extensible, customizable, self-documenting text editor
+category = Development
+source = xbps
+icon = emacs
+version = 30.2
+size_bytes = 62914560
+---
+
+[app]
+id = xbps:mousepad
+name = Mousepad
+summary = Editor de texto simple para Xfce
+summary_en = Simple text editor for Xfce
+category = Development
+source = xbps
+icon = org.xfce.mousepad
+version = 0.7.0
+size_bytes = 3145728
+---
+
+[app]
+id = xbps:git
+name = git
+summary = Sistema de control de versiones distribuido
+summary_en = Distributed version control system
+category = Development
+source = xbps
+icon = applications-vcs
+version = 2.54.0
+size_bytes = 31457280
+---
+
+[app]
+id = xbps:meld
+name = Meld
+summary = Herramienta visual de diferencias y fusión
+summary_en = Visual diff and merge tool
+category = Development
+source = xbps
+icon = meld
+version = 3.24.0
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:gitg
+name = gitg
+summary = Visor y gestor de repositorios Git para GNOME
+summary_en = Git repository viewer and manager for GNOME
+category = Development
+source = xbps
+icon = gitg
+version = 44
+size_bytes = 6291456
+---
+
+[app]
+id = xbps:alacritty
+name = Alacritty
+summary = Emulador de terminal GPU-acelerado
+summary_en = GPU-accelerated terminal emulator
+category = Development
+source = xbps
+icon = Alacritty
+version = 0.17.0
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:kitty
+name = kitty
+summary = Emulador de terminal GPU acelerado, rápido y con características
+summary_en = GPU-based terminal emulator with rich features
+category = Development
+source = xbps
+icon = kitty
+version = 0.47.4
+size_bytes = 7340032
+---
+
+[app]
+id = xbps:tmux
+name = tmux
+summary = Multiplexor de terminales para gestionar múltiples sesiones
+summary_en = Terminal multiplexer
+category = Development
+source = xbps
+icon = utilities-terminal
+version = 3.6b
+size_bytes = 3145728
+---
+
+# ── UTILITIES ────────────────────────────────────────────────
+
+[app]
+id = xbps:keepassxc
+name = KeePassXC
+summary = Gestor de contraseñas de código abierto multiplataforma
+summary_en = Cross-platform open source password manager
+category = Utilities
+source = xbps
+icon = keepassxc
+version = 2.7.12
+size_bytes = 52428800
+---
+
+[app]
+id = xbps:calibre
+name = Calibre
+summary = Gestión de libros electrónicos y conversor de formatos
+summary_en = E-book management and format converter
+category = Utilities
+source = xbps
+icon = calibre-gui
+version = 9.10.0
+size_bytes = 262144000
+---
+
+[app]
+id = xbps:zathura
+name = Zathura
+summary = Visor de documentos minimalista con atajos de teclado tipo vi
+summary_en = Minimalist document viewer with vi-like keybindings
+category = Utilities
+source = xbps
+icon = zathura
+version = 0.5.13
+size_bytes = 1572864
+---
+
+[app]
+id = xbps:evince
+name = Evince
+summary = Visor de documentos para GNOME (PDF, DjVu, XPS, etc.)
+summary_en = Document viewer for GNOME (PDF, DjVu, XPS, etc.)
+category = Utilities
+source = xbps
+icon = org.gnome.Evince
+version = 48.1
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:okular
+name = Okular
+summary = Visor de documentos universal para KDE
+summary_en = Universal document viewer for KDE
+category = Utilities
+source = xbps
+icon = okular
+version = 26.04.1
+size_bytes = 31457280
+---
+
+[app]
+id = xbps:thunar
+name = Thunar
+pkgname = Thunar
+summary = Gestor de archivos para Xfce
+summary_en = File manager for Xfce
+category = Utilities
+source = xbps
+icon = org.xfce.thunar
+version = 4.20.8
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:nemo
+name = Nemo
+summary = Gestor de archivos para Cinnamon
+summary_en = File manager for Cinnamon
+category = Utilities
+source = xbps
+icon = nemo
+version = 6.4.5
+size_bytes = 8388608
+---
+
+[app]
+id = xbps:ranger
+name = ranger
+summary = Gestor de archivos para terminal con interfaz tipo vi
+summary_en = Console file manager with vi-like keybindings
+category = Utilities
+source = xbps
+icon = utilities-file-manager
+version = 1.9.4
+size_bytes = 2097152
+---
+
+[app]
+id = xbps:mc
+name = Midnight Commander
+summary = Gestor de archivos visual de doble panel para terminal
+summary_en = Visual two-panel file manager for terminal
+category = Utilities
+source = xbps
+icon = utilities-file-manager
+version = 4.8.33
+size_bytes = 8388608
+---
+
+[app]
+id = xbps:baobab
+name = Baobab
+summary = Analizador de uso de disco gráfico para GNOME
+summary_en = Graphical disk usage analyzer for GNOME
+category = Utilities
+source = xbps
+icon = org.gnome.baobab
+version = 48.0
+size_bytes = 3145728
+---
+
+[app]
+id = xbps:bleachbit
+name = BleachBit
+summary = Liberador de espacio en disco y protector de privacidad
+summary_en = Free disk space and maintain privacy
+category = Utilities
+source = xbps
+icon = bleachbit
+version = 6.0.0
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:libreoffice
+name = LibreOffice
+summary = Suite ofimática gratuita y compatible con Microsoft Office
+summary_en = Free office suite compatible with Microsoft Office
+category = Utilities
+source = xbps
+icon = libreoffice-writer
+version = 26.2.4.2
+size_bytes = 786432000
+top_app = true
+---
+
+# ── SYSTEM ───────────────────────────────────────────────────
+
+[app]
+id = xbps:htop
+name = htop
+summary = Visor interactivo de procesos del sistema
+summary_en = Interactive process viewer
+category = System
+source = xbps
+icon = utilities-system-monitor
+version = 3.5.1
+size_bytes = 1258291
+---
+
+[app]
+id = xbps:btop
+name = btop
+summary = Monitor de recursos del sistema con interfaz moderna
+summary_en = Resource monitor with a modern interface
+category = System
+source = xbps
+icon = utilities-system-monitor
+version = 1.4.7
+size_bytes = 3145728
+---
+
+[app]
+id = xbps:gparted
+name = GParted
+summary = Editor de particiones de disco gráfico
+summary_en = Graphical disk partition editor
+category = System
+source = xbps
+icon = gparted
+version = 1.8.1
+size_bytes = 5242880
+---
+
+# ── GAMES ────────────────────────────────────────────────────
+
+[app]
+id = xbps:steam
+name = Steam
+summary = Plataforma de distribución de juegos (requiere repo nonfree)
+summary_en = Game distribution platform (requires nonfree repo)
+category = Games
+source = xbps
+icon = steam
+version = 1.0.0.85
+size_bytes = 838860800
+featured = true
+---
+
+[app]
+id = xbps:lutris
+name = Lutris
+summary = Plataforma de juegos para gestionar títulos de Windows y Linux
+summary_en = Gaming platform for managing Windows and Linux titles
+category = Games
+source = xbps
+icon = net.lutris.Lutris
+version = 0.5.22
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:wine
+name = Wine
+summary = Capa de compatibilidad para ejecutar aplicaciones de Windows
+summary_en = Compatibility layer for running Windows applications
+category = Games
+source = xbps
+icon = wine
+version = 11.12
+size_bytes = 524288000
+---
+
+[app]
+id = xbps:supertuxkart
+name = SuperTuxKart
+summary = Juego de carreras de karts de código abierto
+summary_en = Open-source kart racing game
+category = Games
+source = xbps
+icon = supertuxkart
+version = 1.5
+size_bytes = 524288000
+---
+
+[app]
+id = xbps:luanti
+name = Luanti
+summary = Motor de juego tipo vóxel de código abierto (antes «Minetest»)
+summary_en = Open source voxel game engine (formerly "Minetest")
+category = Games
+source = xbps
+icon = luanti
+version = 5.16.1
+size_bytes = 41943040
+---
+
+[app]
+id = xbps:0ad
+name = 0 A.D.
+summary = Juego de estrategia histórico en tiempo real
+summary_en = Historical real-time strategy game
+category = Games
+source = xbps
+icon = 0ad
+version = 0.27.1
+size_bytes = 2147483648
+---
+
+# ── SCIENCE ──────────────────────────────────────────────────
+
+[app]
+id = xbps:gnuplot
+name = gnuplot
+summary = Herramienta de gráficas científicas interactiva
+summary_en = Interactive scientific plotting tool
+category = Science
+source = xbps
+icon = applications-science
+version = 6.0.4
+size_bytes = 5242880
+---
+
+[app]
+id = xbps:octave
+name = GNU Octave
+summary = Lenguaje de alto nivel para computación numérica (alternativa a MATLAB)
+summary_en = High-level language for numerical computing (MATLAB alternative)
+category = Science
+source = xbps
+icon = octave
+version = 11.1.0
+size_bytes = 209715200
+---
+
+# ── MÁS INTERNET ─────────────────────────────────────────────
+
+[app]
+id = xbps:qutebrowser
+name = qutebrowser
+summary = Navegador ligero controlado por teclado, estilo Vim
+summary_en = Keyboard-driven, Vim-like lightweight browser
+category = Internet
+source = xbps
+icon = qutebrowser
+version = 3.4.1
+size_bytes = 41943040
+---
+
+[app]
+id = xbps:falkon
+name = Falkon
+summary = Navegador web ligero basado en QtWebEngine
+summary_en = Lightweight QtWebEngine-based web browser
+category = Internet
+source = xbps
+icon = falkon
+version = 24.08.3
+size_bytes = 73400320
+---
+
+[app]
+id = xbps:discord
+name = Discord
+summary = Chat de voz, vídeo y texto para comunidades
+summary_en = Voice, video and text chat for communities
+category = Internet
+source = xbps
+icon = discord
+version = 0.0.96
+size_bytes = 178257920
+---
+
+[app]
+id = xbps:element-desktop
+name = Element
+summary = Cliente de mensajería segura para el protocolo Matrix
+summary_en = Secure messaging client for the Matrix protocol
+category = Internet
+source = xbps
+icon = element-desktop
+version = 1.11.98
+size_bytes = 115343360
+---
+
+[app]
+id = xbps:pidgin
+name = Pidgin
+summary = Cliente de mensajería multiprotocolo
+summary_en = Multi-protocol instant messaging client
+category = Internet
+source = xbps
+icon = pidgin
+version = 2.14.14
+size_bytes = 12582912
+---
+
+[app]
+id = xbps:neomutt
+name = NeoMutt
+summary = Cliente de correo por terminal, rápido y extensible
+summary_en = Fast, extensible terminal-based email client
+category = Internet
+source = xbps
+icon = mail-client
+version = 20250609
+size_bytes = 4194304
+---
+
+# ── MÁS MULTIMEDIA ───────────────────────────────────────────
+
+[app]
+id = xbps:spotify
+name = Spotify
+summary = Música y podcasts en streaming
+summary_en = Streaming music and podcasts
+category = Multimedia
+source = xbps
+icon = spotify-client
+version = 1.2.63
+size_bytes = 178257920
+---
+
+[app]
+id = xbps:clementine
+name = Clementine
+summary = Reproductor y organizador de música moderno
+summary_en = Modern music player and library organizer
+category = Multimedia
+source = xbps
+icon = clementine
+version = 1.4.2
+size_bytes = 41943040
+---
+
+[app]
+id = xbps:deadbeef
+name = DeaDBeeF
+summary = Reproductor de audio ligero y personalizable
+summary_en = Lightweight, customizable audio player
+category = Multimedia
+source = xbps
+icon = deadbeef
+version = 1.10.1
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:kodi
+name = Kodi
+summary = Centro multimedia para películas, series y música
+summary_en = Media center for movies, TV shows and music
+category = Multimedia
+source = xbps
+icon = kodi
+version = 22.0.0
+size_bytes = 209715200
+---
+
+# ── MÁS GRÁFICOS ─────────────────────────────────────────────
+
+[app]
+id = xbps:scribus
+name = Scribus
+summary = Autoedición profesional para maquetación e impresión
+summary_en = Professional desktop publishing and page layout
+category = Graphics
+source = xbps
+icon = scribus
+version = 1.7.0
+size_bytes = 115343360
+---
+
+[app]
+id = xbps:digikam
+name = digiKam
+summary = Gestión y organización avanzada de fotografías
+summary_en = Advanced photo management and organization
+category = Graphics
+source = xbps
+icon = digikam
+version = 8.6.0
+size_bytes = 157286400
+---
+
+[app]
+id = xbps:pinta
+name = Pinta
+summary = Edición de imágenes simple, inspirada en Paint.NET
+summary_en = Simple image editing, inspired by Paint.NET
+category = Graphics
+source = xbps
+icon = pinta
+version = 2.1.4
+size_bytes = 20971520
+---
+
+[app]
+id = xbps:synfigstudio
+name = Synfig Studio
+summary = Animación 2D vectorial de código abierto
+summary_en = Open-source vector-based 2D animation
+category = Graphics
+source = xbps
+icon = synfigstudio
+version = 1.5.3
+size_bytes = 94371840
+---
+
+# ── MÁS DESARROLLO ───────────────────────────────────────────
+
+[app]
+id = xbps:vim
+name = Vim
+summary = Editor de texto modal, rápido y muy extensible
+summary_en = Highly extensible, fast modal text editor
+category = Development
+source = xbps
+icon = vim
+version = 9.1.1200
+size_bytes = 8388608
+---
+
+[app]
+id = xbps:vscodium
+name = VSCodium
+summary = Editor de código, build libre de VS Code sin telemetría
+summary_en = Code editor, telemetry-free build of VS Code
+category = Development
+source = xbps
+icon = vscodium
+version = 1.99.3
+size_bytes = 262144000
+---
+
+[app]
+id = xbps:docker
+name = Docker
+summary = Plataforma de contenedores para desarrollo y despliegue
+summary_en = Container platform for development and deployment
+category = Development
+source = xbps
+icon = docker
+version = 27.5.1
+size_bytes = 115343360
+---
+
+[app]
+id = xbps:geany
+name = Geany
+summary = IDE ligero con soporte para múltiples lenguajes
+summary_en = Lightweight IDE with multi-language support
+category = Development
+source = xbps
+icon = geany
+version = 2.1
+size_bytes = 12582912
+---
+
+[app]
+id = xbps:cmake
+name = CMake
+summary = Sistema de generación de builds multiplataforma
+summary_en = Cross-platform build system generator
+category = Development
+source = xbps
+icon = cmake
+version = 3.31.4
+size_bytes = 20971520
+---
+
+[app]
+id = xbps:gdb
+name = GDB
+summary = Depurador estándar de GNU para C, C++ y más
+summary_en = The GNU Project debugger, for C, C++ and more
+category = Development
+source = xbps
+icon = utilities-terminal
+version = 16.1
+size_bytes = 15728640
+---
+
+# ── MÁS UTILIDADES ───────────────────────────────────────────
+
+[app]
+id = xbps:flameshot
+name = Flameshot
+summary = Capturas de pantalla con anotaciones al instante
+summary_en = Powerful, easy-to-use screenshot tool with annotations
+category = Utilities
+source = xbps
+icon = flameshot
+version = 13.0.2
+size_bytes = 8388608
+---
+
+[app]
+id = xbps:timeshift
+name = Timeshift
+summary = Copias de seguridad del sistema mediante instantáneas
+summary_en = System restore via filesystem snapshots
+category = Utilities
+source = xbps
+icon = timeshift
+version = 24.01.1
+size_bytes = 12582912
+---
+
+[app]
+id = xbps:syncthing
+name = Syncthing
+summary = Sincronización de archivos continua y descentralizada
+summary_en = Continuous, decentralized file synchronization
+category = Utilities
+source = xbps
+icon = syncthing
+version = 1.29.2
+size_bytes = 20971520
+---
+
+[app]
+id = xbps:redshift
+name = Redshift
+summary = Ajusta la temperatura de color de la pantalla según la hora
+summary_en = Adjusts screen color temperature based on time of day
+category = Utilities
+source = xbps
+icon = redshift
+version = 1.12
+size_bytes = 2097152
+---
+
+[app]
+id = xbps:aria2
+name = aria2
+summary = Utilidad de descarga ligera y multiprotocolo
+summary_en = Lightweight multi-protocol download utility
+category = Utilities
+source = xbps
+icon = folder-download
+version = 1.37.0
+size_bytes = 4194304
+---
+
+[app]
+id = xbps:peek
+name = Peek
+summary = Grabadora sencilla de pantalla en GIF
+summary_en = Simple animated GIF screen recorder
+category = Utilities
+source = xbps
+icon = peek
+version = 1.5.1
+size_bytes = 3145728
+---
+
+# ── MÁS SISTEMA ───────────────────────────────────────────────
+
+[app]
+id = xbps:neofetch
+name = Neofetch
+summary = Muestra información del sistema con estilo en la terminal
+summary_en = Stylish system information tool for the terminal
+category = System
+source = xbps
+icon = utilities-terminal
+version = 7.1.0
+size_bytes = 1048576
+---
+
+[app]
+id = xbps:fastfetch
+name = Fastfetch
+summary = Herramienta de información del sistema, rápida y personalizable
+summary_en = Fast, highly customizable system information tool
+category = System
+source = xbps
+icon = utilities-terminal
+version = 2.36.1
+size_bytes = 2097152
+---
+
+[app]
+id = xbps:gnome-disk-utility
+name = Discos
+summary = Gestión de discos, particiones e imágenes
+summary_en = Manage disks, partitions and disk images
+category = System
+source = xbps
+icon = gnome-disks
+version = 47.0
+size_bytes = 10485760
+---
+
+[app]
+id = xbps:gufw
+name = GUFW
+summary = Interfaz gráfica sencilla para el cortafuegos UFW
+summary_en = Simple graphical interface for the UFW firewall
+category = System
+source = xbps
+icon = firewall
+version = 25.04.1
+size_bytes = 4194304
+---
+
+[app]
+id = xbps:psensor
+name = Psensor
+summary = Monitoriza temperaturas y sensores de hardware
+summary_en = Monitor hardware temperatures and sensors
+category = System
+source = xbps
+icon = psensor
+version = 2.1.0
+size_bytes = 3145728
+---
+
+# ── MÁS JUEGOS ────────────────────────────────────────────────
+
+[app]
+id = xbps:xonotic
+name = Xonotic
+summary = Shooter en primera persona, rápido y gratuito
+summary_en = Fast-paced, free first-person arena shooter
+category = Games
+source = xbps
+icon = xonotic
+version = 0.8.6
+size_bytes = 1073741824
+---
+
+[app]
+id = xbps:openttd
+name = OpenTTD
+summary = Simulador de transportes basado en Transport Tycoon Deluxe
+summary_en = Transport simulation game based on Transport Tycoon Deluxe
+category = Games
+source = xbps
+icon = openttd
+version = 14.1
+size_bytes = 104857600
+---
+
+[app]
+id = xbps:warzone2100
+name = Warzone 2100
+summary = Estrategia en tiempo real post-apocalíptica
+summary_en = Post-apocalyptic real-time strategy game
+category = Games
+source = xbps
+icon = warzone2100
+version = 4.5.2
+size_bytes = 314572800
+---
+
+[app]
+id = xbps:extremetuxracer
+name = Extreme Tux Racer
+summary = Carreras de trineo con Tux, la mascota de Linux
+summary_en = Sledding race game starring Tux, the Linux mascot
+category = Games
+source = xbps
+icon = etr
+version = 0.8.2
+size_bytes = 41943040
+---
+
+# ── MÁS CIENCIA ───────────────────────────────────────────────
+
+[app]
+id = xbps:qgis
+name = QGIS
+summary = Sistema de información geográfica (SIG) de código abierto
+summary_en = Open-source geographic information system (GIS)
+category = Science
+source = xbps
+icon = qgis
+version = 3.40.3
+size_bytes = 314572800
+---
+
+[app]
+id = xbps:stellarium
+name = Stellarium
+summary = Planetario de código abierto para tu ordenador
+summary_en = Open-source planetarium for your computer
+category = Science
+source = xbps
+icon = stellarium
+version = 25.1
+size_bytes = 209715200
+---
+
+[app]
+id = xbps:maxima
+name = Maxima
+summary = Sistema de álgebra computacional
+summary_en = Computer algebra system
+category = Science
+source = xbps
+icon = maxima
+version = 5.47.0
+size_bytes = 41943040
+---
+
+[app]
+id = xbps:R
+name = GNU R
+summary = Lenguaje y entorno para computación estadística
+summary_en = Language and environment for statistical computing
+category = Science
+source = xbps
+icon = R
+version = 4.4.2
+size_bytes = 94371840
+---
+
+# ── EDUCACIÓN ─────────────────────────────────────────────────
+
+[app]
+id = xbps:gcompris
+name = GCompris
+summary = Suite educativa con actividades para niños
+summary_en = Educational software suite with activities for children
+category = Education
+source = xbps
+icon = gcompris
+version = 4.4
+size_bytes = 314572800
+---
+
+[app]
+id = xbps:anki
+name = Anki
+summary = Tarjetas de memoria con repetición espaciada
+summary_en = Spaced-repetition flashcards for efficient learning
+category = Education
+source = xbps
+icon = anki
+version = 25.02
+size_bytes = 115343360
+---
+
+[app]
+id = xbps:tuxmath
+name = TuxMath
+summary = Práctica de matemáticas para niños, con Tux
+summary_en = Math practice game for kids, starring Tux
+category = Education
+source = xbps
+icon = tuxmath
+version = 2.0.3
+size_bytes = 12582912
+---
+
+[app]
+id = xbps:kalzium
+name = Kalzium
+summary = Tabla periódica interactiva y herramientas de química
+summary_en = Interactive periodic table and chemistry tools
+category = Education
+source = xbps
+icon = kalzium
+version = 24.12.1
+size_bytes = 41943040
+---
+
+[app]
+id = xbps:klavaro
+name = Klavaro
+summary = Tutor de mecanografía, para aprender a escribir rápido
+summary_en = Touch-typing tutor to learn fast, accurate typing
+category = Education
+source = xbps
+icon = klavaro
+version = 3.14
+size_bytes = 2097152
+---

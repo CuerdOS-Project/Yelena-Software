@@ -1,0 +1,87 @@
+# ============================================================
+# Yelena Software — Provides XBPS (Void Linux)
+# ============================================================
+# Paquetes que DEBEN actualizarse primero, en una pasada separada,
+# antes de actualizar el resto del sistema con xbps-install -Su.
+#
+# Razón: ciertos paquetes (xbps, kernel, desktops...) traen cambios
+# que pueden dejar el sistema en estado inconsistente si se mezclan
+# con la actualización general. Se actualizan primero en su propio
+# xbps-install -y <lista>, y luego se corre la pasada general.
+#
+# Equivale a:
+#   xbps-install -Su xbps libxbps ...
+#   xbps-install -Su
+#
+# Editable: agrega o quita entradas libremente.
+# Soporta patrones fnmatch (*, ?, [abc]).
+# ============================================================
+
+# ── XBPS ─────────────────────────────────────────────────────
+# Debe ir primero: una versión vieja del gestor puede no entender
+# índices o formatos nuevos del repositorio.
+name:xbps
+name:libxbps
+name:xbps-triggers
+name:xbps-static
+
+# ── KERNEL ───────────────────────────────────────────────────
+# El kernel y el initramfs deben aplicarse antes que cualquier
+# módulo o aplicación que dependa de la ABI del núcleo.
+name:linux
+name:linux5.*
+name:linux6.*
+name:linux-headers
+name:dracut
+
+# ── KDE (ESCRITORIO) ─────────────────────────────────────────
+name:kf6-*
+name:plasma-desktop
+name:plasma-workspace
+name:plasma-wayland-protocols
+name:kwin
+name:kde-*
+name:kdeplasma-*
+name:plasma-*
+
+# ── GNOME (ESCRITORIO) ───────────────────────────────────────
+name:gnome-shell
+name:mutter
+name:gdm
+name:gnome-session
+name:gnome-settings-daemon
+name:gnome-control-center
+
+# ── LXQt ─────────────────────────────────────────────────────
+name:lxqt
+name:lxqt-*
+
+# ── XFCE ─────────────────────────────────────────────────────
+name:xfce4
+name:xfce4-*
+name:xfwm4
+name:thunar
+
+# ── LABWC / SWAY ─────────────────────────────────────────────
+name:labwc
+name:sway
+name:swayidle
+name:swaylock
+name:wlroots
+
+# ── RAMJET ───────────────────────────────────────────────────
+# Meta-paquete base de CuerdOS; siempre primero.
+name:ramjet
+
+# ── GNU BASE ─────────────────────────────────────────────────
+# Herramientas del espacio de usuario de GNU cuya versión afecta
+# al resto del sistema si se actualizan mezcladas.
+name:bash
+name:glibc
+name:glibc-locales
+name:coreutils
+name:binutils
+name:gcc
+name:make
+name:sudo
+name:openssl
