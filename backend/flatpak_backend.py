@@ -522,25 +522,22 @@ get_flatpak_updates = get_updates
 
 KNOWN_REMOTES: dict[str, dict[str, str]] = {
     "flathub": {
-        "label": "Flathub",
+        "name_key": "flatpak_remote_flathub_name",
+        "desc_key": "flatpak_remote_flathub_desc",
         "url":   "https://flathub.org/repo/flathub.flatpakrepo",
-                    "desc":  "El repositorio Flatpak principal, con miles de apps.",
-            "icon":  "flathub.svg",
-
+        "icon":  "flathub.svg",
     },
     "flathub-beta": {
-        "label": "Flathub Beta",
+        "name_key": "flatpak_remote_flathub_beta_name",
+        "desc_key": "flatpak_remote_flathub_beta_desc",
         "url":   "https://flathub.org/beta-repo/flathub-beta.flatpakrepo",
-                    "desc":  "Versiones beta/en pruebas de apps publicadas en Flathub.",
-            "icon":  "flathub.svg",
-
+        "icon":  "flathub.svg",
     },
     "gnome-nightly": {
-        "label": "GNOME Nightly",
+        "name_key": "flatpak_remote_gnome_nightly_name",
+        "desc_key": "flatpak_remote_gnome_nightly_desc",
         "url":   "https://nightly.gnome.org/gnome-nightly.flatpakrepo",
-                    "desc":  "Builds nocturnas de GNOME, actualizadas cada día.",
-            "icon":  "gnome-nightly.svg",
-
+        "icon":  "gnome-nightly.svg",
     },
 }
 
@@ -632,4 +629,3 @@ def remote_remove(key: str) -> tuple[bool, str]:
         return False, "Tiempo de espera agotado."
     except Exception as e:
         return False, str(e)
-

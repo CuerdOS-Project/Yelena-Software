@@ -434,9 +434,7 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
     Execute an XBPS task (install/remove/update/refresh).
     Yields (progress_percent, status_text) tuples.
     """
-    from .agent_yelena import authorize, build_xbps_command
-
-    from .admin_session import should_start_authentication
+    from .agent_yelena import build_xbps_command
 
     # `name` es el nombre "bonito" para la UI; el identificador real que
     pkg_name = task.package.pkgname or task.package.name
@@ -470,10 +468,9 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
         return
 
     try:
-        # Autoriza el proceso antes de lanzar pkexec para permitir que polkit
-        # reutilice auth_admin_keep en operaciones posteriores.
-        if should_start_authentication():
-            authorize(operation)
+        # No ejecutar pkcheck antes: pkexec es quien debe solicitar y validar
+        # la autorización para esta operación. Hacer ambas cosas abría dos
+        # diálogos consecutivos para el mismo proceso.
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -700,7 +697,7 @@ def refresh_repos_stream(max_retries: int = 2, retry_delay: float = 2.5,
     """
     import time as _time
     from .xbps_error_handler import check_xbps_health, classify_error, cancelled_error
-    from .agent_yelena import authorize, build_xbps_command
+    from .agent_yelena import build_xbps_command
 
     health_issue = check_xbps_health()
     if health_issue is not None:
@@ -736,7 +733,6 @@ def refresh_repos_stream(max_retries: int = 2, retry_delay: float = 2.5,
         attempt += 1
         last_tail = []
         try:
-            authorize("install")
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -783,19 +779,10 @@ def build_install_cmds(updates: List[dict]) -> List[List[str]]:
     completa del sistema (`-Syu`: sincroniza repos + actualiza todo lo
     instalado), en vez de enumerar paquete por paquete.
 
-    Se devuelve un único comando a propósito (antes podía haber una
-    pasada previa para paquetes "prioritarios"): quien ejecuta esto
-    (`_run_commands` en updates_page.py) agrupa varios comandos root en
-    un `sh -c "cmd1 && cmd2"` para pedir la contraseña una sola vez, y
-    ese envoltorio hace que pkexec deje de reconocer el binario concreto
-    (xbps-install) y muestre el diálogo de autenticación genérico en vez
-    del de agent-yelena. Con un solo comando, pkexec se invoca
-    directamente sobre xbps-install y respeta la política/el mensaje
-    configurados para agent-yelena.
-
-    Importante: este comando se devuelve "en crudo" (sin privilegio)
-    porque quien lo ejecuta ya lo envuelve UNA sola vez con
-    pkexec/sudo/doas para pedir la contraseña una única vez.
+    Se devuelve un único comando para que una actualización completa
+    corresponda a una única invocación de pkexec. El comando se devuelve
+    "en crudo" (sin privilegio); la interfaz lo pasa directamente por el
+    puente agent-yelena, sin envolverlo en una shell.
     """
     xbps_install = shutil.which("xbps-install") or "xbps-install"
     has_xbps_updates = any(u.get("type") == "xbps" for u in updates)
@@ -806,10 +793,10 @@ def build_install_cmds(updates: List[dict]) -> List[List[str]]:
 
 def build_install_selected_cmds(packages: List[str]) -> List[List[str]]:
     """
-    Construye comandos xbps-install (SIN pkexec/sudo) para los paquetes
-    indicados. Igual que build_install_cmds, respeta el orden de
-    prioridad de data/provides_xbps.kn. Ver la nota de build_install_cmds
-    sobre por qué NO se envuelven aquí con privilegios.
+    Construye un solo comando xbps-install (SIN pkexec/sudo) con los
+    paquetes indicados, para que una selección del usuario use una sola
+    invocación de pkexec y un solo diálogo de autenticación. Se conserva
+    primero el orden prioritario, sin dividirlo en procesos distintos.
     """
     from . import provides as _provides
 
@@ -818,9 +805,5 @@ def build_install_selected_cmds(packages: List[str]) -> List[List[str]]:
         return []
 
     priority, rest = _provides.split_priority_xbps(packages)
-    cmds: List[List[str]] = []
-    if priority:
-        cmds.append([xbps_install, "-y"] + priority)
-    if rest:
-        cmds.append([xbps_install, "-y"] + rest)
-    return cmds
+    ordered = priority + rest
+    return [[xbps_install, "-y", *ordered]] if ordered else []

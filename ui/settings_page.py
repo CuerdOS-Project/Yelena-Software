@@ -408,12 +408,13 @@ class SettingsPage(QWidget):
 
             text_col = QVBoxLayout()
             text_col.setSpacing(2)
-            name_lbl = QLabel(info["label"])
+            remote_name = tr(info["name_key"])
+            name_lbl = QLabel(remote_name)
             f = name_lbl.font()
             f.setBold(True)
             name_lbl.setFont(f)
             text_col.addWidget(name_lbl)
-            desc_lbl = QLabel(info["desc"])
+            desc_lbl = QLabel(tr(info["desc_key"]))
             desc_lbl.setObjectName("sectionSub")
             desc_lbl.setWordWrap(True)
             text_col.addWidget(desc_lbl)
@@ -441,7 +442,7 @@ class SettingsPage(QWidget):
             self._remote_rows[key] = {
                 "status_lbl": status_lbl, "btn": action_btn,
                 "default_btn": default_btn,
-                "label": info["label"],
+                "label": remote_name,
             }
             self._set_remote_row_state(key, key in already_added)
 
