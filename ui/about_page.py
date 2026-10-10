@@ -5,13 +5,17 @@ from __future__ import annotations
 import os
 
 from PySide6 import __version__ as _pyside_version
-from PySide6.QtCore import Qt, QSize, QCoreApplication, qVersion
+from PySide6.QtCore import (
+    Qt, QSize, QCoreApplication, qVersion, Signal,
+    QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
+)
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import (
     QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QGraphicsOpacityEffect,
 )
 
 from core.i18n import tr
@@ -125,7 +129,7 @@ class _SpeechBubble(QWidget):
 
 
 class _YelenaGreeting(QWidget):
-    """Yelena saludando: dibujo con un globo de diálogo, sin tarjeta."""
+    """Ilustración secreta de Yelena, revelada desde el easter egg de About."""
 
     _ART_HEIGHT = 330
 
@@ -137,16 +141,40 @@ class _YelenaGreeting(QWidget):
         lay.setSpacing(2)
 
         lay.addWidget(_SpeechBubble(tr("about_yelena_greeting")))
+        self._image = QLabel()
+        self._image.setFixedSize(230, self._ART_HEIGHT)
+        self._image.setAlignment(Qt.AlignCenter)
+        self._image.hide()
+        lay.addWidget(self._image)
 
-        art = QPixmap(os.path.join(_ROOT, "resources", "yelena.png"))
-        if not art.isNull():
-            dpr = QGuiApplication.primaryScreen().devicePixelRatio()
-            art = art.scaledToHeight(round(self._ART_HEIGHT * dpr), Qt.SmoothTransformation)
-            art.setDevicePixelRatio(dpr)
-            pic = QLabel()
-            pic.setPixmap(art)
-            pic.setAlignment(Qt.AlignCenter)
-            lay.addWidget(pic)
+    def unlock(self) -> bool:
+        """Carga y muestra la imagen procesada en resources/yelena.kdi."""
+        path = os.path.join(_ROOT, "resources", "yelena.kdi")
+        try:
+            from core.kdi_image import decode_kdi
+            with open(path, "rb") as image_file:
+                art = QPixmap()
+                if not art.loadFromData(decode_kdi(image_file.read())):
+                    return False
+        except (OSError, ValueError):
+            return False
+
+        screen = QGuiApplication.primaryScreen()
+        dpr = screen.devicePixelRatio() if screen else 1.0
+        art = art.scaledToHeight(round(self._ART_HEIGHT * dpr), Qt.SmoothTransformation)
+        art.setDevicePixelRatio(dpr)
+        self._image.setPixmap(art)
+        self._image.show()
+        return True
+
+
+class _ClickableLogo(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class AboutPage(QWidget):
@@ -164,6 +192,9 @@ class AboutPage(QWidget):
         outer.addStretch()
 
         self._yelena = _YelenaGreeting()
+        self._yelena_unlocked = False
+        self._yelena_animation = None
+        self._yelena.hide()
         outer.addWidget(self._yelena, alignment=Qt.AlignVCenter)
 
         col = QVBoxLayout()
@@ -177,8 +208,13 @@ class AboutPage(QWidget):
         banner_v.setSpacing(6)
         banner_v.setAlignment(Qt.AlignCenter)
 
-        icon_lbl = QLabel()
+        icon_lbl = _ClickableLogo()
         icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setFixedSize(72, 72)
+        icon_lbl.setCursor(Qt.PointingHandCursor)
+        icon_lbl.setToolTip(tr("about_logo_easter_egg_hint"))
+        self._logo_clicks = 0
+        icon_lbl.clicked.connect(self._on_logo_clicked)
         px = _load_app_icon(size=72)
         if px:
             icon_lbl.setPixmap(px)
@@ -257,7 +293,52 @@ class AboutPage(QWidget):
         root.addLayout(outer)
         root.addStretch()
 
+    def _on_logo_clicked(self) -> None:
+        if self._yelena_unlocked or self._logo_clicks >= 3:
+            return
+        self._logo_clicks += 1
+        if self._logo_clicks == 3:
+            if self._yelena.unlock():
+                self._reveal_yelena_section()
+
+    def _reveal_yelena_section(self) -> None:
+        """Expande y desvanece en entrada toda la columna de Yelena."""
+        self._yelena_unlocked = True
+        target_width = max(1, self._yelena.sizeHint().width())
+        target_height = max(1, self._yelena.sizeHint().height())
+
+        self._yelena.setMaximumWidth(0)
+        self._yelena.setMaximumHeight(0)
+        opacity = QGraphicsOpacityEffect(self._yelena)
+        opacity.setOpacity(0.0)
+        self._yelena.setGraphicsEffect(opacity)
+        self._yelena.show()
+
+        group = QParallelAnimationGroup(self)
+        for prop, end_value in ((b"maximumWidth", target_width), (b"maximumHeight", target_height)):
+            animation = QPropertyAnimation(self._yelena, prop, group)
+            animation.setDuration(420)
+            animation.setStartValue(0)
+            animation.setEndValue(end_value)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            group.addAnimation(animation)
+
+        fade = QPropertyAnimation(opacity, b"opacity", group)
+        fade.setDuration(360)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.OutCubic)
+        group.addAnimation(fade)
+        group.finished.connect(self._finish_yelena_reveal)
+        self._yelena_animation = group
+        group.start()
+
+    def _finish_yelena_reveal(self) -> None:
+        self._yelena.setMaximumWidth(16777215)
+        self._yelena.setMaximumHeight(16777215)
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # En ventanas estrechas se oculta la ilustración para no apretar el contenido.
-        self._yelena.setVisible(self.width() >= 920)
+        # La columna completa permanece oculta hasta desbloquearse; una vez
+        # revelada no vuelve a desaparecer al redimensionar la ventana.
+        self._yelena.setVisible(self._yelena_unlocked)

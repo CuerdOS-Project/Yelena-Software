@@ -1613,8 +1613,7 @@ class UpdatesPage(QWidget):
                 root_cmds.append(cmd)
 
         # Cada comando XBPS pasa directamente por pkexec. Nunca se construye
-        # un `sh -c`: así la política de polkit sigue identificando el binario
-        # concreto y no existe una vía para ejecutar shell arbitrario.
+        # un `sh -c`: así no existe una vía para ejecutar shell arbitrario.
         grouped_root: list = []
         if root_cmds:
             grouped_root = [_build_root_cmd(cmd) for cmd in root_cmds]
@@ -1645,6 +1644,9 @@ class UpdatesPage(QWidget):
         def _thread():
             last_lines: list[str] = []
             try:
+                if grouped_root:
+                    from backend.agent_yelena import ensure_policy
+                    ensure_policy()
                 for cmd in all_cmds:
                     if self._proc_mgr.cancelled:
                         break

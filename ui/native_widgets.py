@@ -457,6 +457,7 @@ _BADGE_ACCENTS: dict[str, str] = {
     "appimage": "#8B5CF6",
     "local":    "#8B5CF6",
     "installed": "#4CAF50",
+    "architecture": "#D97706",
 }
 
 
@@ -922,9 +923,12 @@ class TopBarWidget(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class NavButton(QPushButton):
-    """Botón de navegación de la barra lateral. Nativo y marcable
-    (checkable) para indicar la página activa; el propio QStyle pinta el
-    estado "checked"/"hover" con los colores del tema del sistema."""
+    """Botón de navegación transparente hasta que se activa.
+
+    Los botones no seleccionados muestran solo su contenido (icono/texto),
+    sin una placa de botón permanente. La pestaña seleccionada usa el color
+    de acento de la paleta y el hover un tinte suave del mismo color.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -932,6 +936,8 @@ class NavButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(36)
         _pt(self, 11)
+        self._nav_style_cache = None
+        self._apply_nav_style()
         # Microtransición discreta: da respuesta al pasar el puntero sin
         # mover el layout ni provocar saltos en la barra superior.
         self._hover_effect = QGraphicsOpacityEffect(self)
@@ -940,6 +946,31 @@ class NavButton(QPushButton):
         self._hover_anim = QPropertyAnimation(self._hover_effect, b"opacity", self)
         self._hover_anim.setDuration(140)
         self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def _apply_nav_style(self) -> None:
+        """Usa la paleta activa para que el estado seleccionado siga el tema."""
+        palette = self.palette()
+        accent = palette.color(QPalette.Highlight).name()
+        selected_text = palette.color(QPalette.HighlightedText).name()
+        style = (
+            "QPushButton { background-color: transparent; border: none; "
+            "border-radius: 8px; padding: 6px 10px; }"
+            f"QPushButton:hover {{ background-color: rgba({QColor(accent).red()}, "
+            f"{QColor(accent).green()}, {QColor(accent).blue()}, 34); }}"
+            f"QPushButton:checked {{ background-color: {accent}; color: {selected_text}; }}"
+            f"QPushButton:checked:hover {{ background-color: {accent}; color: {selected_text}; }}"
+            "QPushButton:disabled { background-color: transparent; }"
+        )
+        # setStyleSheet puede producir otro evento de paleta en Qt. Evitar
+        # reaplicar el mismo QSS desde changeEvent y entrar en recursión.
+        if style != self._nav_style_cache:
+            self._nav_style_cache = style
+            self.setStyleSheet(style)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._apply_nav_style()
 
     def _animate_hover(self, opacity: float) -> None:
         self._hover_anim.stop()

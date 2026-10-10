@@ -624,6 +624,8 @@ class YelenaApplet:
         self._startup_checks = 0
         self._check_running = False
         self._check_thread: Optional[threading.Thread] = None
+        self._recheck_scheduled = False
+        self._emitter_refresh_pending = False
         self._shutting_down = False
 
         self._signals = _Signals()
@@ -877,6 +879,12 @@ class YelenaApplet:
 
         self._prev_count = count
         self._count      = count
+        if self._emitter_refresh_pending:
+            self._emitter_refresh_pending = False
+            # La base de datos ya se guardó en _do_check antes de emitirse
+            # check_finished; ahora el store puede recargarla sin leer datos
+            # anteriores a la transacción de FPM.
+            self._signal_store()
         if not self.background_mode:
             self._signals.update_icon.emit(count)
 
@@ -1100,22 +1108,29 @@ class YelenaApplet:
                 )
 
     def _schedule_recheck(self) -> None:
+        if self._shutting_down or self._recheck_scheduled:
+            return
+        self._recheck_scheduled = True
+        self._emitter_refresh_pending = True
         logger.info("Re-check in 5 s")
-        self._count          = 0
-        self._updates        = []
-        self._prev_count     = 0
-        self._notified       = 0
-        self._startup_checks = 0
-        self._check_running  = False
-        if not self.background_mode:
-            self._signals.update_icon.emit(0)
         self._check_timer.stop()
 
         def _do():
-            self._do_check(manual=False, periodic=False)
+            if self._shutting_down:
+                self._recheck_scheduled = False
+                self._emitter_refresh_pending = False
+                return
+            # No false reset of _check_running: the worker owns that state.
+            # Wait until it exits, then run one fresh check after the FPM
+            # transaction; repeated SIGUSR2 signals are coalesced above.
+            if self._check_running:
+                QTimer.singleShot(1000, _do)
+                return
+            self._recheck_scheduled = False
+            self._notified = 0
+            self._do_check(periodic=True)
             self._check_timer.setInterval(self._interval * 1000)
             self._check_timer.start()
-            self._signal_store()
 
         QTimer.singleShot(5000, _do)
 

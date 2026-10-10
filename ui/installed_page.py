@@ -41,10 +41,7 @@ def _pkg_key(pkg: Package) -> tuple:
 
 
 def _pkg_fallback_icon(pkg: Package) -> str:
-    for tag in pkg.tags:
-        if tag.startswith("_category_icon:"):
-            return tag[len("_category_icon:"):]
-    return ""
+    return pkg.icon_fallback_name
 
 
 def _child_is_button(widget, pos) -> bool:
@@ -88,6 +85,11 @@ class InstalledRow(CardFrame):
 
         badge = BadgeLabel(pkg.source_label, pkg.badge_type, show_icon=False)
         layout.addWidget(badge)
+        if pkg.is_32bit:
+            layout.addWidget(BadgeLabel(
+                tr("badge_32bit"), "architecture",
+                tooltip=tr("warning_32bit"), show_icon=False,
+            ))
 
         installed_badge = BadgeLabel(tr("badge_installed"), "installed", show_icon=False)
         layout.addWidget(installed_badge)
@@ -142,6 +144,11 @@ class InstalledTile(CardFrame):
 
         badge = BadgeLabel(pkg.source_label, pkg.badge_type, show_icon=False)
         top_row.addWidget(badge, 0, Qt.AlignTop)
+        if pkg.is_32bit:
+            top_row.addWidget(BadgeLabel(
+                tr("badge_32bit"), "architecture",
+                tooltip=tr("warning_32bit"), show_icon=False,
+            ), 0, Qt.AlignTop)
 
         installed_badge = BadgeLabel(tr("badge_installed"), "installed", show_icon=False)
         top_row.addWidget(installed_badge, 0, Qt.AlignTop)
@@ -306,7 +313,8 @@ class InstalledPage(QWidget):
         root.setContentsMargins(20, 16, 20, 20)
         root.setSpacing(10)
 
-        # MainWindow coloca estos controles en la barra compartida de búsqueda.
+        # Controles ocultos que el menú superior manipula; no se muestran
+        # junto al campo de búsqueda.
         left = QWidget()
         left.setObjectName("installedToolbarLeft")
         left_lay = QHBoxLayout(left)
@@ -345,6 +353,10 @@ class InstalledPage(QWidget):
 
         self._toolbar_left = left
         self._toolbar_right = right
+        # Los controles permanecen accesibles desde el botón de opciones
+        # superior, no en la fila de búsqueda.
+        left.setVisible(False)
+        right.setVisible(False)
 
         # Status / loading label
         self._status_lbl = QLabel(tr("loading"))
@@ -538,10 +550,7 @@ class InstalledPage(QWidget):
             self._start_loader()
 
     def get_toolbar_widgets(self) -> tuple[QWidget, QWidget]:
-        """(izquierda, derecha): desplegable de fuente / botón de añadir
-        AppImage — MainWindow los coloca a cada lado del cuadro de
-        búsqueda, mostrándolos solo mientras la barra de búsqueda está
-        abierta y esta página (Instaladas) está activa."""
+        """Compatibilidad: devuelve los contenedores ocultos de filtros/acciones."""
         return self._toolbar_left, self._toolbar_right
 
     def _on_add_appimage(self):

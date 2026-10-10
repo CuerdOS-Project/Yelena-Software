@@ -180,25 +180,38 @@ def _parse_nissa_search(output: str, limit: int = 5000, version: int = _V1) -> l
 
 
 def search(query: str, limit: int = 5000) -> list[Package]:
-    """Search XBPS catalog through FPM's sibling-call NISSA protocol."""
+    """Search configured XBPS repositories through FPM's NISSA protocol.
+
+    Repository selection and architecture are controlled by the active XBPS
+    configuration. A malformed NISSA stream falls back to native XBPS search
+    instead of being misreported as an empty catalog.
+    """
     query = query.strip()
     if not query:
         return []
     binary = fpm_path()
     if not binary:
-        return []
+        from . import xbps_backend
+        return xbps_backend.search(query, limit)
     version = _V2 if _supports_nissa_v2(binary) else _V1
     messages = _request(version, "search", query)
-    return _packages_from_search(messages, limit, version)
+    packages = _packages_from_search(messages, limit, version)
+    if packages is None:
+        from . import xbps_backend
+        return xbps_backend.search(query, limit)
+    return packages
 
 
-def _packages_from_search(messages: list[dict[str, Any]], limit: int, version: int) -> list[Package]:
+def _packages_from_search(messages: list[dict[str, Any]], limit: int,
+                          version: int) -> Optional[list[Package]]:
     rows = _parse_result_stream(messages, "search", version)
+    if rows is None:
+        return None
     packages: list[Package] = []
     for payload in rows[:max(0, limit)]:
         name = str(payload.get("name") or "").strip()
         if not name:
-            return []
+            return None
         installed = payload.get("installed") is True
         packages.append(Package(
             id=f"xbps:{name}",
@@ -210,6 +223,8 @@ def _packages_from_search(messages: list[dict[str, Any]], limit: int, version: i
             status=PackageStatus.INSTALLED if installed else PackageStatus.NOT_INSTALLED,
             icon_name=name,
             category="Other",
+            architecture=str(payload.get("architecture") or payload.get("arch") or ""),
+            repository=str(payload.get("repository") or ""),
             pkgname=name,
         ))
     return packages
@@ -231,6 +246,8 @@ def _package_from_installed(payload: dict[str, Any]) -> Optional[Package]:
         status=PackageStatus.INSTALLED,
         icon_name=name,
         category="Other",
+        architecture=str(payload.get("architecture") or payload.get("arch") or ""),
+        repository=str(payload.get("repository") or ""),
         pkgname=name,
     )
 
@@ -268,6 +285,8 @@ def list_upgradable() -> list[Package]:
             status=PackageStatus.UPDATE_AVAILABLE,
             icon_name=name,
             category="Other",
+            architecture=str(row.get("arch") or row.get("architecture") or ""),
+            repository=str(row.get("repository") or ""),
             pkgname=name,
         ))
     return packages
@@ -290,7 +309,7 @@ def get_updates() -> list[dict[str, Any]]:
             "arch": str(row.get("arch") or ""),
             "download_size": 0,
             "install_size": 0,
-            "repo": "XBPS",
+            "repo": str(row.get("repository") or "XBPS"),
             "icon_name": str(row.get("name") or ""),
         }
         for row in rows if row.get("name")
@@ -302,10 +321,12 @@ def get_details(pkg_name: str) -> Optional[Package]:
     messages = _request(_V2, "info", pkg_name)
     rows = _parse_result_stream(messages, "info", _V2)
     if rows is None or len(rows) != 1:
-        return None
+        from . import xbps_backend
+        return xbps_backend.get_details(pkg_name)
     payload = rows[0]
     if not payload.get("name"):
-        return None
+        from . import xbps_backend
+        return xbps_backend.get_details(pkg_name)
     installed = payload.get("installed") is True
     version = str(payload.get("version") or "")
     installed_version = str(payload.get("installed_version") or "")
@@ -323,6 +344,8 @@ def get_details(pkg_name: str) -> Optional[Package]:
         size_bytes=int(payload.get("installed_size") or 0),
         website=str(payload.get("homepage") or ""),
         license=str(payload.get("license") or ""),
+        architecture=str(payload.get("architecture") or payload.get("arch") or ""),
+        repository=str(payload.get("repository") or ""),
         pkgname=str(payload["name"]),
     )
 

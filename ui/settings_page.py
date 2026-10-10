@@ -13,7 +13,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QCheckBox, QComboBox, QFrame, QScrollArea, QRadioButton,
-    QButtonGroup, QTabWidget, QMessageBox, QSpinBox,
+    QButtonGroup, QTabWidget, QMessageBox,
 )
 
 import core.settings as app_settings
@@ -123,30 +123,6 @@ def _do_restart() -> None:
         QApplication.instance().quit()
 
 
-class _SecurityInstallWorker(QThread):
-    """Instala las políticas de agent-yelena en un hilo aparte para no
-    congelar la interfaz mientras pkexec espera la contraseña."""
-    finished_ = Signal(bool, str)
-
-    def run(self):
-        from backend import agent_yelena
-        ok, msg = agent_yelena.install()
-        self.finished_.emit(ok, msg)
-
-
-class _AdminSessionAuthWorker(QThread):
-    """Pide autenticación inmediatamente al activar una ventana temporal."""
-    finished_ = Signal(bool, str)
-
-    def run(self):
-        from backend import agent_yelena
-        try:
-            agent_yelena.authorize("install", require_tool=True)
-            self.finished_.emit(True, "")
-        except Exception as exc:
-            self.finished_.emit(False, str(exc))
-
-
 class _RemoteAddWorker(QThread):
     """Ejecuta `flatpak remote-add` en un hilo aparte para no congelar la
     interfaz mientras flatpak espera la contraseña/polkit."""
@@ -233,18 +209,6 @@ class SettingsPage(QWidget):
         package_page_layout.setContentsMargins(0, 0, 0, 0)
         package_page_layout.addWidget(package_scroll)
 
-        security_page = QWidget()
-        security_scroll = QScrollArea()
-        security_scroll.setWidgetResizable(True)
-        security_scroll.setFrameShape(QFrame.NoFrame)
-        security_content = QWidget()
-        security_v = QVBoxLayout(security_content)
-        security_v.setContentsMargins(32, 28, 32, 28)
-        security_v.setSpacing(16)
-        security_scroll.setWidget(security_content)
-        security_page_layout = QVBoxLayout(security_page)
-        security_page_layout.setContentsMargins(0, 0, 0, 0)
-        security_page_layout.addWidget(security_scroll)
 
         v = general_v
 
@@ -496,76 +460,8 @@ class SettingsPage(QWidget):
 
         v.addStretch()
 
-        # Seguridad: instalar/ver estado de las políticas polkit de
-        # agent-yelena. Si no están instaladas, la app sigue funcionando
-        # con el backend normal (autenticación genérica, sin identificar
-        # a agent-yelena) — ver backend/agent_yelena.py.
-        v = security_v
-        v.addWidget(_section_label(tr("settings_security_section")))
-
-        sec_hint = QLabel(tr("settings_security_hint"))
-        sec_hint.setObjectName("sectionSub")
-        sec_hint.setWordWrap(True)
-        v.addWidget(sec_hint)
-
-        sec_row = QHBoxLayout()
-        sec_row.setSpacing(12)
-        self._security_status_lbl = QLabel()
-        sec_row.addWidget(self._security_status_lbl)
-        sec_row.addStretch()
-        self._security_install_btn = InstallButton(tr("settings_security_install_btn"))
-        self._security_install_btn.clicked.connect(self._on_install_security)
-        sec_row.addWidget(self._security_install_btn)
-        v.addLayout(sec_row)
-
-        v.addWidget(_sep())
-        v.addWidget(_section_label(tr("settings_admin_expiry_section")))
-        expiry_row = QHBoxLayout()
-        expiry_row.setSpacing(12)
-        self._admin_expiry_combo = QComboBox()
-        self._admin_expiry_combo.setObjectName("settingsCombo")
-        self._admin_expiry_combo.setFixedWidth(240)
-        for key, label in (("always", tr("settings_admin_expiry_always")),
-                           ("5m", tr("settings_admin_expiry_5m")),
-                           ("10m", tr("settings_admin_expiry_10m")),
-                           ("30m", tr("settings_admin_expiry_30m")),
-                           ("custom", tr("settings_admin_expiry_custom"))):
-            self._admin_expiry_combo.addItem(label, key)
-        current_expiry = app_settings.get("admin_expiry_mode", "always")
-        idx_expiry = self._admin_expiry_combo.findData(current_expiry)
-        self._admin_expiry_combo.setCurrentIndex(idx_expiry if idx_expiry >= 0 else 0)
-        expiry_row.addWidget(self._admin_expiry_combo)
-        self._admin_custom_minutes = QSpinBox()
-        self._admin_custom_minutes.setRange(1, 120)
-        self._admin_custom_minutes.setSuffix(tr("settings_admin_expiry_minutes_suffix"))
-        self._admin_custom_minutes.setValue(int(app_settings.get("admin_expiry_custom_minutes", 5)))
-        self._admin_custom_minutes.setVisible(current_expiry == "custom")
-        self._admin_previous_mode = current_expiry if current_expiry in ("always", "5m", "10m", "30m", "custom") else "always"
-        self._admin_previous_minutes = self._admin_custom_minutes.value()
-        expiry_row.addWidget(self._admin_custom_minutes)
-        expiry_row.addStretch()
-        v.addLayout(expiry_row)
-        self._admin_expiry_status = QLabel()
-        self._admin_expiry_status.setObjectName("sectionSub")
-        self._admin_expiry_status.setWordWrap(True)
-        v.addWidget(self._admin_expiry_status)
-        self._admin_expiry_timer = QTimer(self)
-        self._admin_expiry_timer.setInterval(1000)
-        self._admin_expiry_timer.timeout.connect(self._refresh_admin_expiry)
-        self._admin_expiry_timer.start()
-        self._admin_expiry_combo.currentIndexChanged.connect(self._on_admin_expiry_changed)
-        self._admin_custom_minutes.valueChanged.connect(self._on_admin_custom_minutes_changed)
-        from backend import admin_session
-        admin_session.configure(current_expiry if current_expiry in admin_session.MODES else "always",
-                                self._admin_custom_minutes.value())
-        self._refresh_admin_expiry()
-
-        v.addStretch()
-        self._refresh_security_status()
-
         tabs.addTab(general_page, tr("settings_tab_general"))
         tabs.addTab(package_page, tr("settings_tab_packages"))
-        tabs.addTab(security_page, tr("settings_tab_security"))
 
         # Guardado automático: no hay botón ni línea divisora inferior.
         for combo in (self._lang_combo, self._theme_combo):
@@ -579,121 +475,6 @@ class SettingsPage(QWidget):
             self._chk_check_startup,
         ):
             checkbox.stateChanged.connect(self._on_auto_save)
-
-    # Seguridad — agent-yelena
-
-    def _refresh_security_status(self) -> None:
-        from backend import agent_yelena
-        installed = agent_yelena.is_installed()
-        current = getattr(agent_yelena, "policy_action_is_current", lambda: installed)()
-        self._security_status_lbl.setText(
-            (tr("settings_security_installed") if current else tr("settings_security_update_available")) if installed
-            else tr("settings_security_not_installed")
-        )
-        self._security_install_btn.setEnabled(not current)
-
-    def _on_admin_expiry_changed(self, *_args) -> None:
-        custom = self._admin_expiry_combo.currentData() == "custom"
-        self._admin_custom_minutes.setVisible(custom)
-        if custom:
-            QMessageBox.warning(self, tr("settings_admin_expiry_warning_title"),
-                                tr("settings_admin_expiry_warning_body"))
-        self._activate_admin_session()
-
-    def _on_admin_custom_minutes_changed(self, *_args) -> None:
-        if self._admin_expiry_combo.currentData() == "custom":
-            self._activate_admin_session()
-
-    def _activate_admin_session(self) -> None:
-        from backend import admin_session
-        mode = self._admin_expiry_combo.currentData() or "always"
-        minutes = self._admin_custom_minutes.value()
-        admin_session.configure(mode, minutes)
-        if mode == "always":
-            self._admin_previous_mode = mode
-            self._admin_previous_minutes = minutes
-            self._on_auto_save()
-            self._refresh_admin_expiry()
-            return
-        self._admin_expiry_combo.setEnabled(False)
-        self._admin_custom_minutes.setEnabled(False)
-        self._admin_auth_pending = True
-        self._admin_expiry_status.setText(tr("settings_admin_expiry_authenticating"))
-        worker = _AdminSessionAuthWorker(self)
-        worker.finished_.connect(self._on_admin_session_auth_finished)
-        self._admin_session_auth_worker = worker
-        worker.start()
-
-    def _on_admin_session_auth_finished(self, ok: bool, message: str) -> None:
-        from backend import admin_session
-        self._admin_auth_pending = False
-        self._admin_expiry_combo.setEnabled(True)
-        self._admin_custom_minutes.setEnabled(True)
-        if ok:
-            admin_session.activate_authenticated()
-            self._admin_previous_mode = self._admin_expiry_combo.currentData() or "always"
-            self._admin_previous_minutes = self._admin_custom_minutes.value()
-            self._on_auto_save()
-            self._refresh_admin_expiry()
-            return
-        old_mode = self._admin_previous_mode
-        old_minutes = self._admin_previous_minutes
-        idx = self._admin_expiry_combo.findData(old_mode)
-        self._admin_expiry_combo.blockSignals(True)
-        if idx >= 0:
-            self._admin_expiry_combo.setCurrentIndex(idx)
-        self._admin_expiry_combo.blockSignals(False)
-        self._admin_custom_minutes.blockSignals(True)
-        self._admin_custom_minutes.setValue(old_minutes)
-        self._admin_custom_minutes.blockSignals(False)
-        admin_session.configure(old_mode, old_minutes)
-        self._refresh_admin_expiry()
-        QMessageBox.warning(self, tr("settings_admin_expiry_auth_error_title"), message)
-
-    def _refresh_admin_expiry(self) -> None:
-        from backend import admin_session
-        if getattr(self, "_admin_auth_pending", False):
-            return
-        mode = self._admin_expiry_combo.currentData() or "always"
-        remaining = admin_session.remaining_seconds()
-        if mode == "always":
-            self._admin_expiry_status.setText(tr("settings_admin_expiry_status_always"))
-        elif remaining is None:
-            self._admin_expiry_status.setText(tr("settings_admin_expiry_status_waiting"))
-        else:
-            self._admin_expiry_status.setText(tr("settings_admin_expiry_status_remaining", minutes=remaining // 60, seconds=remaining % 60))
-
-    def _on_install_security(self) -> None:
-        answer = QMessageBox.question(
-            self,
-            tr("settings_security_confirm_title"),
-            tr("settings_security_confirm_body"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        self._security_install_btn.setEnabled(False)
-        self._security_status_lbl.setText(tr("settings_security_installing"))
-        worker = _SecurityInstallWorker(self)
-        worker.finished_.connect(self._on_security_install_finished)
-        self._security_install_worker = worker
-        worker.start()
-
-    def _on_security_install_finished(self, ok: bool, message: str) -> None:
-        self._refresh_security_status()
-        if ok:
-            QMessageBox.information(
-                self,
-                tr("settings_security_restart_title"),
-                tr("settings_security_restart_body"),
-            )
-        else:
-            QMessageBox.warning(
-                self,
-                tr("settings_security_error_title"),
-                message,
-            )
 
     # Repositorios Flatpak
 
@@ -851,8 +632,6 @@ class SettingsPage(QWidget):
         app_settings.set_value(
             "package_engine", self._package_engine_combo.currentData() or "yelena-buddies"
         )
-        app_settings.set_value("admin_expiry_mode", self._admin_expiry_combo.currentData() or "always")
-        app_settings.set_value("admin_expiry_custom_minutes", self._admin_custom_minutes.value())
         # InstalledPage persiste la vista; XBPS se muestra si está disponible.
         app_settings.set_bool("show_xbps", show_xbps())
         app_settings.save()

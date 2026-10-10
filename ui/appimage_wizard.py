@@ -520,7 +520,7 @@ class _SummaryPage(QWizardPage):
 
 
 class AppImageInstallWizard(QWizard):
-    """Asistente de 4 pasos para instalar un AppImage vía FPM."""
+    """Asistente de 4 pasos para instalar un AppImage vía aimg."""
 
     def __init__(self, parent=None, initial_path: str = ""):
         super().__init__(parent)

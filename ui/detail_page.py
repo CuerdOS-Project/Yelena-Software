@@ -17,13 +17,8 @@ from .native_widgets import BadgeLabel, InstallButton, RemoveButton, UpdateButto
 
 
 def _pkg_fallback_icon(pkg: Package) -> str:
-    """Ícono de respaldo por categoría, codificado como tag
-    "_category_icon:<nombre>" por los backends (ver xbps_backend.py /
-    flatpak_backend.py). Antes esta página lo ignoraba por completo."""
-    for tag in pkg.tags:
-        if tag.startswith("_category_icon:"):
-            return tag[len("_category_icon:"):]
-    return ""
+    """Fallback coherente por fuente, centralizado en Package."""
+    return pkg.icon_fallback_name
 
 
 def _make_sep():
@@ -112,6 +107,13 @@ class AppDetailPage(QWidget):
         self._installed_badge.setVisible(False)
         badge_row.addWidget(self._installed_badge)
 
+        self._arch_badge = BadgeLabel(
+            tr("badge_32bit"), "architecture",
+            tooltip=tr("warning_32bit"), show_icon=False,
+        )
+        self._arch_badge.setVisible(False)
+        badge_row.addWidget(self._arch_badge)
+
         self._version_lbl = QLabel("")
         self._version_lbl.setObjectName("detailVersion")
         badge_row.addWidget(self._version_lbl)
@@ -156,6 +158,17 @@ class AppDetailPage(QWidget):
         self._summary_lbl.setWordWrap(True)
         self._content_layout.addWidget(self._summary_lbl)
 
+        self._arch_warning_lbl = QLabel(tr("warning_32bit"))
+        self._arch_warning_lbl.setObjectName("architectureWarning")
+        self._arch_warning_lbl.setWordWrap(True)
+        self._arch_warning_lbl.setStyleSheet(
+            "QLabel#architectureWarning { color: #B45309; "
+            "background-color: rgba(217, 119, 6, 28); "
+            "border-left: 3px solid #D97706; border-radius: 4px; padding: 8px; }"
+        )
+        self._arch_warning_lbl.setVisible(False)
+        self._content_layout.addWidget(self._arch_warning_lbl)
+
         # Description (rich text)
         self._desc_browser = QTextBrowser()
         self._desc_browser.setObjectName("detailDesc")
@@ -199,6 +212,8 @@ class AppDetailPage(QWidget):
         # Name & badges
         self._name_lbl.setText(pkg.name)
         self._version_lbl.setText(pkg.version or "")
+        self._arch_badge.setVisible(pkg.is_32bit)
+        self._arch_warning_lbl.setVisible(pkg.is_32bit)
 
         if pkg.source == PackageSource.FLATPAK:
             self._source_badge.set_badge_type("flatpak")
@@ -247,6 +262,11 @@ class AppDetailPage(QWidget):
         size_label = tr("meta_disk_size") if pkg.is_installed else tr("meta_size")
         self._meta_container.addWidget(_meta_row(size_label, pkg.size_str))
         self._meta_container.addWidget(_meta_row(tr("meta_type"), pkg.source_label))
+        if pkg.architecture or pkg.is_32bit:
+            arch_value = pkg.architecture or ("i686 / 32-bit" if pkg.is_32bit else "")
+            self._meta_container.addWidget(_meta_row(tr("meta_architecture"), arch_value))
+        if pkg.repository:
+            self._meta_container.addWidget(_meta_row(tr("meta_repository"), pkg.repository))
         self._meta_container.addWidget(_meta_row(tr("meta_category"), pkg.category))
         if pkg.license:
             self._meta_container.addWidget(_meta_row(tr("meta_license"), pkg.license))
@@ -367,7 +387,7 @@ class AppDetailPage(QWidget):
 
     def _on_update_appimage(self):
         """Actualiza un AppImage ya instalado: pide el archivo .AppImage
-        nuevo y reemplaza el viejo con FPM (no hay servidor de por
+        nuevo y reemplaza el viejo mediante aimg (no hay servidor de por
         medio, es un reemplazo local del archivo)."""
         from PySide6.QtWidgets import QFileDialog, QMessageBox
         from backend import appimage_backend

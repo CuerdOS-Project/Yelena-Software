@@ -50,22 +50,20 @@ _ICON_MAP: dict[str, str] = {
 
 
 def _guess_icon(name: str) -> str:
-    """Ícono de tema más probable para el paquete.
+    """Elige el alias de icono más cercano conocido, o prueba el nombre real.
 
-    Antes, cualquier nombre que no estuviera en _ICON_MAP (un puñado de
-    alias a mano) caía directo al ícono genérico — es decir, casi todos
-    los paquetes instalados terminaban mostrando el mismo engranaje sin
-    importar cuál fueran. La mayoría de los temas de íconos nombran el
-    ícono de una app igual que su binario/paquete (p.ej. "audacity",
-    "ark", "gimp", "krita"), así que probamos primero un alias conocido
-    y, si no hay, el nombre real del paquete tal cual — la capa de UI
-    ya sabe qué hacer si tampoco eso resuelve contra el tema instalado
-    (ver AppIconWidget: cae al ícono de categoría y por último al
-    genérico)."""
+    Se reconocen tokens exactos y prefijos/sufijos comunes del nombre del
+    paquete (p. ej. ``vlc-plugins``, ``libvlc`` o ``vlc-devel``). La UI
+    intenta primero este nombre en el tema; si no existe, usa el fallback
+    genérico de paquete para XBPS.
+    """
     lower = name.lower()
-    for k, v in _ICON_MAP.items():
-        if k in lower:
-            return v
+    tokens = re.findall(r"[a-z0-9]+", lower)
+    # Los alias más largos tienen prioridad para evitar coincidencias
+    # parciales menos específicas.
+    for key in sorted(_ICON_MAP, key=len, reverse=True):
+        if any(token == key or (token.startswith("lib") and token.endswith(key)) for token in tokens):
+            return _ICON_MAP[key]
     return name
 
 
@@ -141,11 +139,13 @@ def _parse_xbps_show(output: str, pkg_name: str) -> Optional[Package]:
     version = fields.get("pkgver", "").split("-")[-1] if fields.get("pkgver") else ""
     summary = fields.get("short_desc", f"{name} package")
     desc = fields.get("long_desc", summary) or summary
-    section = fields.get("categories", fields.get("repository", ""))
+    section = fields.get("categories", "")
     category = _map_section(section)
+    repository = fields.get("repository", "")
     homepage = fields.get("homepage", "")
     license_ = fields.get("license", "")
     maintainer = fields.get("maintainer", "")
+    architecture = fields.get("architecture", fields.get("arch", ""))
 
     size_str = fields.get("installed_size", "0")
     try:
@@ -167,6 +167,8 @@ def _parse_xbps_show(output: str, pkg_name: str) -> Optional[Package]:
         developer=maintainer,
         website=homepage,
         license=license_,
+        architecture=architecture,
+        repository=repository,
         tags=[_category_icon_tag(category)],
     )
 
@@ -434,7 +436,7 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
     Execute an XBPS task (install/remove/update/refresh).
     Yields (progress_percent, status_text) tuples.
     """
-    from .agent_yelena import build_xbps_command
+    from .agent_yelena import build_xbps_command, ensure_policy
 
     # `name` es el nombre "bonito" para la UI; el identificador real que
     pkg_name = task.package.pkgname or task.package.name
@@ -471,6 +473,7 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
         # No ejecutar pkcheck antes: pkexec es quien debe solicitar y validar
         # la autorización para esta operación. Hacer ambas cosas abría dos
         # diálogos consecutivos para el mismo proceso.
+        ensure_policy()
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -697,7 +700,7 @@ def refresh_repos_stream(max_retries: int = 2, retry_delay: float = 2.5,
     """
     import time as _time
     from .xbps_error_handler import check_xbps_health, classify_error, cancelled_error
-    from .agent_yelena import build_xbps_command
+    from .agent_yelena import build_xbps_command, ensure_policy
 
     health_issue = check_xbps_health()
     if health_issue is not None:
@@ -729,6 +732,7 @@ def refresh_repos_stream(max_retries: int = 2, retry_delay: float = 2.5,
 
     attempt = 0
     last_tail: list[str] = []
+    ensure_policy()
     while True:
         attempt += 1
         last_tail = []

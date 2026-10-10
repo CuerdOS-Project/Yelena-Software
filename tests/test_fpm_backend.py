@@ -82,6 +82,30 @@ class FpmBackendTests(unittest.TestCase):
         )
         self.assertEqual([p.name for p in rows], ["firefox"])
 
+    @patch("backend.xbps_backend.search")
+    @patch.object(fpm_backend, "_request", return_value=[])
+    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
+    def test_invalid_nissa_search_falls_back_to_native_xbps(
+        self, _path, _supports, _request, native_search
+    ):
+        native_search.return_value = []
+        self.assertEqual(fpm_backend.search("firefox"), [])
+        native_search.assert_called_once_with("firefox", 5000)
+
+    @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
+    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend.subprocess, "run")
+    def test_search_preserves_optional_architecture_field(self, run, _supports, _path):
+        run.return_value = SimpleNamespace(
+            stdout=stream("search", [{
+                "name": "lib32-example", "version": "1_1",
+                "summary": "Example 32-bit package", "architecture": "i686",
+            }]), returncode=0,
+        )
+        rows = fpm_backend.search("lib32-example")
+        self.assertEqual(rows[0].architecture, "i686")
+
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
     @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
@@ -125,6 +149,8 @@ class FpmBackendTests(unittest.TestCase):
                 "description": "A browser", "homepage": "https://example.test",
                 "license": "MPL-2.0", "installed": True,
                 "installed_version": "127.0_1", "installed_size": 4096,
+                "architecture": "x86_64-musl",
+                "repository": "current/musl",
             }, version=2),
             response("info.done", {"ok": True, "count": 1}, ok=True, version=2),
         ]), returncode=0)
@@ -133,6 +159,15 @@ class FpmBackendTests(unittest.TestCase):
         self.assertEqual(pkg.installed_version, "127.0_1")
         self.assertEqual(pkg.size_bytes, 4096)
         self.assertEqual(pkg.website, "https://example.test")
+        self.assertEqual(pkg.architecture, "x86_64-musl")
+        self.assertEqual(pkg.repository, "current/musl")
+
+    @patch("backend.xbps_backend.get_details")
+    @patch.object(fpm_backend, "_request", return_value=[])
+    def test_invalid_nissa_details_fall_back_to_native_xbps(self, _request, native_details):
+        native_details.return_value = None
+        self.assertIsNone(fpm_backend.get_details("firefox"))
+        native_details.assert_called_once_with("firefox")
 
     @patch.object(package_engine, "configured_engine", return_value="fpm")
     @patch("backend.fpm_backend.supports_nissa_v2", return_value=False)

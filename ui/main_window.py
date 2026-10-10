@@ -5,15 +5,18 @@ from __future__ import annotations
 import os
 import subprocess
 
-from PySide6.QtCore import Qt, Slot, QTimer, QSize
+from PySide6.QtCore import (
+    Qt, Slot, QTimer, QSize, QPoint,
+    QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
+)
 from PySide6.QtGui import (
-    QKeySequence, QShortcut, QIcon, QFont, QFontDatabase,
+    QKeySequence, QShortcut, QIcon, QFont, QFontDatabase, QActionGroup,
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QStackedWidget, QLineEdit,
     QFrame, QApplication, QButtonGroup, QPushButton, QGridLayout,
-    QStatusBar,
+    QStatusBar, QMenu,
 )
 
 from backend.task_manager import TaskManager
@@ -38,6 +41,33 @@ PAGE_SETTINGS  = 6
 PAGE_ABOUT     = 7
 
 _TOTAL_PAGES = 8
+
+
+class _AnimatedOptionsMenu(QMenu):
+    """Menú de opciones que entra con un leve deslizamiento y fade-in."""
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        target = self.pos()
+        start = target + QPoint(0, -8)
+        self.setWindowOpacity(0.0)
+        self.move(start)
+
+        group = QParallelAnimationGroup(self)
+        opacity = QPropertyAnimation(self, b"windowOpacity", group)
+        opacity.setDuration(170)
+        opacity.setStartValue(0.0)
+        opacity.setEndValue(1.0)
+        opacity.setEasingCurve(QEasingCurve.OutCubic)
+        movement = QPropertyAnimation(self, b"pos", group)
+        movement.setDuration(190)
+        movement.setStartValue(start)
+        movement.setEndValue(target)
+        movement.setEasingCurve(QEasingCurve.OutCubic)
+        group.addAnimation(opacity)
+        group.addAnimation(movement)
+        self._open_animation = group
+        group.start()
 
 
 def _find_icon(names: list[str], size: int = 20) -> QIcon:
@@ -133,7 +163,6 @@ class MainWindow(QMainWindow):
 
         self._apply_system_font()
         self._task_manager = TaskManager(self)
-        self._tasks_window = None
         self._task_activity_color = None
         self._task_activity_on = False
         self._task_activity_timer = QTimer(self)
@@ -235,6 +264,23 @@ class MainWindow(QMainWindow):
         self._auto_sync_running = False
         QTimer.singleShot(1200, self._maybe_auto_sync_repos)
 
+    def show_runtime_error(self, details: str = "") -> None:
+        """Reporta errores no controlados sin cerrar la tienda."""
+        message = "Ocurrió un problema. Cierra y vuelve a ejecutar la tienda."
+        self._status_bar_lbl.setText(message)
+        self._status_bar_lbl.setToolTip(details or message)
+        self._status_bar_widget.setVisible(True)
+        QTimer.singleShot(20000, lambda: self._clear_runtime_error(message))
+
+    def _clear_runtime_error(self, expected_message: str) -> None:
+        # No borrar un resumen de búsqueda u otro aviso que haya reemplazado
+        # el mensaje mientras el temporizador estaba esperando.
+        if self._status_bar_lbl.text() == expected_message:
+            self._status_bar_lbl.clear()
+            self._status_bar_lbl.setToolTip("")
+            if self._stack.currentIndex() != PAGE_SEARCH:
+                self._status_bar_widget.setVisible(False)
+
     # Eager init for the first page only
 
     def _init_home_page(self):
@@ -275,8 +321,7 @@ class MainWindow(QMainWindow):
             from .updates_page import UpdatesPage
             return UpdatesPage(self)
         if page_id == PAGE_TASKS:
-            # Ya no se navega aquí directamente (ver PAGE_UPDATES), pero
-            # se deja disponible por si algún caller viejo lo pide suelto.
+            # El gestor comparte la ventana y el TaskManager principal.
             from .tasks_page import TasksPage
             return TasksPage(self._task_manager)
         if page_id == PAGE_DETAIL:
@@ -384,8 +429,8 @@ class MainWindow(QMainWindow):
         header.setObjectName("headerBar")
 
         layout = QGridLayout(header)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
         # Tres columnas: los laterales absorben exactamente el mismo espacio
         # sobrante, por lo que las pestañas quedan centradas en X=0 de la
         # ventana, no solo entre los botones visibles.
@@ -397,7 +442,7 @@ class MainWindow(QMainWindow):
         # dentro del mismo espacio reservado. Nunca se dibuja por encima
         # de la barra ni de otros botones.
         left_box = QWidget()
-        left_box.setFixedWidth(200)
+        left_box.setFixedWidth(140)
         left_lay = QHBoxLayout(left_box)
         left_lay.setContentsMargins(0, 0, 0, 0)
         left_lay.setSpacing(0)
@@ -405,8 +450,8 @@ class MainWindow(QMainWindow):
         search_btn = NavButton("")
         search_btn.setCheckable(False)
         search_btn.setIcon(_find_icon(["edit-find-symbolic", "edit-find", "system-search", "search"]))
-        search_btn.setIconSize(QSize(18, 18))
-        search_btn.setFixedSize(36, 36)
+        search_btn.setIconSize(QSize(16, 16))
+        search_btn.setFixedSize(32, 32)
         search_btn.setToolTip(tr("nav_search_tooltip"))
         search_btn.clicked.connect(self._toggle_search_bar)
         self._search_toggle_btn = search_btn
@@ -419,19 +464,23 @@ class MainWindow(QMainWindow):
         tabs_frame = QFrame()
         tabs_frame.setObjectName("tabsBar")
         tabs_lay = QHBoxLayout(tabs_frame)
-        tabs_lay.setContentsMargins(4, 4, 4, 4)
-        tabs_lay.setSpacing(4)
+        tabs_lay.setContentsMargins(3, 2, 3, 2)
+        tabs_lay.setSpacing(2)
 
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
         self._nav_buttons: dict[int, NavButton] = {}
 
-        _TAB_WIDTH = 150
+        # Mismo ancho para las pestañas; deja espacio suficiente para el
+        # rótulo más largo (Actualizaciones) y un margen visual adicional.
+        _TAB_WIDTH = 154
 
         def add_tab(page: int, icon_names: list[str], label: str) -> NavButton:
             btn = _nav_button(icon_names, label)
             btn.setCheckable(True)
             btn.setFixedWidth(_TAB_WIDTH)
+            btn.setFixedHeight(32)
+            btn.setIconSize(QSize(16, 16))
             self._nav_group.addButton(btn)
             tabs_lay.addWidget(btn)
             self._nav_buttons[page] = btn
@@ -453,9 +502,8 @@ class MainWindow(QMainWindow):
         )
         installed_btn.clicked.connect(lambda: self._nav_to(PAGE_INSTALLED))
 
-        # La antigua pestaña "Pendientes" ahora se llama Actualizaciones.
-        # Las tareas tienen su propia ventana, accesible desde el botón de
-        # actividad de la derecha.
+        # Actualizaciones y Tareas son páginas distintas; el botón de Tareas
+        # abre su gestor dentro del stack principal.
         self._updates_tasks_label = tr("nav_updates")
         updates_btn = add_tab(
             PAGE_UPDATES,
@@ -471,12 +519,12 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(tabs_frame, 0, 1, Qt.AlignCenter)
 
-        # --- Derecha: Tareas / Ajustes (ventanas aparte) / Acerca de ---
+        # --- Derecha: Tareas / Ajustes (ventana aparte) / Acerca de ---
         right_box = QWidget()
-        right_box.setFixedWidth(200)
+        right_box.setFixedWidth(140)
         right_lay = QHBoxLayout(right_box)
         right_lay.setContentsMargins(0, 0, 0, 0)
-        right_lay.setSpacing(6)
+        right_lay.setSpacing(4)
         right_lay.addStretch(1)
 
         tasks_btn = _nav_button(
@@ -484,9 +532,27 @@ class MainWindow(QMainWindow):
             tr("nav_tasks"),
             icon_only=True,
         )
-        tasks_btn.setCheckable(False)
-        tasks_btn.clicked.connect(self._open_tasks_window)
+        tasks_btn.setCheckable(True)
+        tasks_btn.setFixedSize(32, 32)
+        tasks_btn.setIconSize(QSize(16, 16))
+        tasks_btn.clicked.connect(self._open_tasks_page)
         self._tasks_btn = tasks_btn
+
+        options_btn = _nav_button(
+            ["preferences-other-symbolic", "view-more-symbolic", "open-menu-symbolic", "view-list-symbolic"],
+            tr("nav_options_tooltip"),
+            icon_only=True,
+        )
+        if options_btn.icon().isNull():
+            options_btn.setText("⋯")
+        options_btn.setAccessibleName(tr("nav_options_tooltip"))
+        options_btn.setObjectName("catalogOptionsButton")
+        options_btn.setCheckable(True)
+        options_btn.setFixedSize(32, 32)
+        options_btn.setIconSize(QSize(16, 16))
+        options_btn.clicked.connect(self._show_catalog_options)
+        self._options_btn = options_btn
+        options_btn.setVisible(False)
 
         settings_btn = _nav_button(
             ["preferences-system-symbolic", "preferences-system", "configure"],
@@ -494,6 +560,8 @@ class MainWindow(QMainWindow):
             icon_only=True,
         )
         settings_btn.setCheckable(False)
+        settings_btn.setFixedSize(32, 32)
+        settings_btn.setIconSize(QSize(16, 16))
         settings_btn.clicked.connect(self._open_settings_dialog)
         self._settings_btn = settings_btn
 
@@ -502,9 +570,12 @@ class MainWindow(QMainWindow):
             tr("nav_about"),
             icon_only=True,
         )
+        about_btn.setFixedSize(32, 32)
+        about_btn.setIconSize(QSize(16, 16))
         about_btn.clicked.connect(lambda: self._nav_to(PAGE_ABOUT))
 
         right_lay.addWidget(tasks_btn)
+        right_lay.addWidget(options_btn)
         right_lay.addWidget(settings_btn)
         right_lay.addWidget(about_btn)
         layout.addWidget(right_box, 0, 2, Qt.AlignRight | Qt.AlignVCenter)
@@ -519,6 +590,85 @@ class MainWindow(QMainWindow):
 
         return header
 
+    @staticmethod
+    def _add_combo_actions(menu: QMenu, combo) -> None:
+        """Representa las opciones de un QComboBox como acciones de menú."""
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for index in range(combo.count()):
+            action = menu.addAction(combo.itemText(index))
+            action.setCheckable(True)
+            action.setChecked(index == combo.currentIndex())
+            group.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, c=combo, i=index: c.setCurrentIndex(i)
+            )
+
+    def _show_catalog_options(self) -> None:
+        """Abre los filtros y acciones que antes ocupaban la barra de búsqueda."""
+        current = self._stack.currentIndex()
+        menu = _AnimatedOptionsMenu(self)
+
+        if current == PAGE_INSTALLED:
+            page = self._pages[PAGE_INSTALLED] or self._installed_page
+            source_combo = page._source_combo
+            source_menu = menu.addMenu(tr("search_source_label"))
+            self._add_combo_actions(source_menu, source_combo)
+
+            right_layout = page._toolbar_right.layout()
+            if right_layout is not None and right_layout.count():
+                menu.addSeparator()
+                add_appimage = menu.addAction(tr("add_appimage_btn"))
+                add_appimage.triggered.connect(page._on_add_appimage)
+        else:
+            page = self._search_page
+            source_menu = menu.addMenu(tr("search_source_label"))
+            self._add_combo_actions(source_menu, page._source_combo)
+
+            sort_title = tr("search_sort_label").rstrip(" :：")
+            sort_menu = menu.addMenu(sort_title)
+            self._add_combo_actions(sort_menu, page._sort_combo)
+
+            menu.addSeparator()
+            show_hidden = menu.addAction(tr("search_show_hidden"))
+            show_hidden.setCheckable(True)
+            show_hidden.setChecked(page._hidden_chk.isChecked())
+            show_hidden.setToolTip(page._hidden_chk.toolTip())
+            show_hidden.toggled.connect(page._hidden_chk.setChecked)
+
+        menu.aboutToShow.connect(lambda: self._options_btn.setChecked(True))
+        menu.aboutToHide.connect(lambda m=menu: self._options_menu_closed(m))
+        self._options_menu = menu
+        pos = self._options_btn.mapToGlobal(
+            QPoint(0, self._options_btn.height() + 4)
+        )
+        menu.popup(pos)
+
+    def _options_menu_closed(self, menu: QMenu) -> None:
+        if getattr(self, "_options_menu", None) is menu:
+            self._options_menu = None
+        if hasattr(self, "_options_btn"):
+            self._options_btn.setChecked(False)
+        menu.deleteLater()
+
+    def _sync_catalog_options_visibility(self) -> None:
+        """Las opciones de filtro solo aparecen en resultados o con búsqueda abierta."""
+        button = getattr(self, "_options_btn", None)
+        if button is None:
+            return
+        page = self._stack.currentIndex() if hasattr(self, "_stack") else PAGE_EXPLORE
+        search_row_open = (
+            hasattr(self, "_search_bar_row")
+            and not self._search_bar_row.isHidden()
+        )
+        visible = page == PAGE_SEARCH or (
+            search_row_open and page in (PAGE_EXPLORE, PAGE_INSTALLED)
+        )
+        button.setVisible(visible)
+        menu = getattr(self, "_options_menu", None)
+        if not visible and menu is not None and menu.isVisible():
+            menu.close()
+
     def _search_btn_icon(self, for_updates: bool) -> QIcon:
         if for_updates:
             return _find_icon([
@@ -527,42 +677,13 @@ class MainWindow(QMainWindow):
             ])
         return _find_icon(["edit-find-symbolic", "edit-find", "system-search", "search"])
 
-    def _more_options_btn_icon(self) -> QIcon:
-        """Icono de "más opciones" (menú): en Instaladas el botón de la
-        cabecera nunca vuelve a buscar, siempre revela el desplegable
-        de fuente + añadir AppImage (ver _open_search_bar), esté la
-        barra abierta o cerrada."""
-        return _find_icon([
-            "open-menu-symbolic", "view-more-symbolic",
-            "application-menu-symbolic", "view-list-symbolic",
-        ])
-
     def _build_search_bar_row(self) -> QWidget:
-        """Fila de búsqueda centrada (no a todo lo ancho) y de tamaño
-        regular. Ocupa el mismo lugar que la barra de categorías mientras
-        está activa en Explorar, y en Instaladas aparece en ese mismo
-        lugar (debajo de las pestañas). En Actualizaciones esta fila ya
-        no se usa: el botón de la cabecera se convierte en "comprobar
-        actualizaciones" (ver _toggle_search_bar).
-
-        Los chips de fuente (izquierda) y "mostrar ocultos"+orden
-        (derecha) de SearchPage se reparentan a cada lado del cuadro de
-        texto, EN LA MISMA FILA — y solo se muestran mientras hay
-        resultados de búsqueda activos (página de resultados), no
-        cuando la barra está abierta pero vacía en Explorar."""
+        """Fila centrada de búsqueda; filtros y orden se agrupan en el menú superior."""
         row = QFrame()
         row.setObjectName("searchBarRow")
         outer = QHBoxLayout(row)
         outer.setContentsMargins(16, 8, 16, 8)
         outer.setSpacing(10)
-
-        # Contenedor izquierdo: chips de fuente (Todo/Flatpak/XBPS).
-        self._search_toolbar_left_box = QWidget()
-        self._search_toolbar_left_lay = QHBoxLayout(self._search_toolbar_left_box)
-        self._search_toolbar_left_lay.setContentsMargins(0, 0, 0, 0)
-        self._search_toolbar_left_box.setVisible(False)
-        outer.addWidget(self._search_toolbar_left_box)
-
         outer.addStretch(1)
 
         inner = QWidget()
@@ -587,15 +708,8 @@ class MainWindow(QMainWindow):
         close_btn.clicked.connect(self._toggle_search_bar)
         inner_lay.addWidget(close_btn)
 
-        outer.addWidget(inner)
+        outer.addWidget(inner, 0, Qt.AlignCenter)
         outer.addStretch(1)
-
-        # Contenedor derecho: "mostrar ocultos" + orden (desplegable).
-        self._search_toolbar_right_box = QWidget()
-        self._search_toolbar_right_lay = QHBoxLayout(self._search_toolbar_right_box)
-        self._search_toolbar_right_lay.setContentsMargins(0, 0, 0, 0)
-        self._search_toolbar_right_box.setVisible(False)
-        outer.addWidget(self._search_toolbar_right_box)
 
         row.setVisible(False)
         return row
@@ -618,117 +732,27 @@ class MainWindow(QMainWindow):
         else:
             self._open_search_bar()
 
-    def _detach_toolbar_widgets(self) -> None:
-        """Quita del layout (sin borrar) cualquier widget de toolbar
-        reparentado actualmente en las cajas izquierda/derecha del
-        buscador — paso previo antes de reparentar el de otra página."""
-        for lay in (self._search_toolbar_left_lay, self._search_toolbar_right_lay):
-            while lay.count():
-                item = lay.takeAt(0)
-                w = item.widget()
-                if w is not None:
-                    w.setParent(None)
-
-    def _attach_toolbar_widgets(self, left, right) -> None:
-        self._detach_toolbar_widgets()
-        self._search_toolbar_left_lay.addWidget(left)
-        self._search_toolbar_right_lay.addWidget(right)
-        # Igualar el ancho de ambas cajas para que el cuadro de texto
-        # quede realmente centrado: si el contenido de un lado es más
-        # ancho que el del otro, el QHBoxLayout con stretch a los dos
-        # lados no alcanza a centrar el buscador por sí solo.
-        w = max(left.sizeHint().width(), right.sizeHint().width())
-        self._search_toolbar_left_box.setMinimumWidth(w)
-        self._search_toolbar_right_box.setMinimumWidth(w)
-
-    def _ensure_search_toolbar_attached(self) -> None:
-        """Reparenta la barra de herramientas de SearchPage (chips de
-        fuente, ocultos, orden) a cada lado del cuadro de búsqueda,
-        y conecta su resumen de resultados a la barra de estado inferior.
-        Las cajas izquierda/derecha son compartidas con InstalledPage
-        (ver _ensure_installed_toolbar_attached): solo una página es
-        "dueña" del contenido a la vez, según cuál esté activa."""
-        if getattr(self, "_toolbar_owner", None) == "search":
-            return
-        sp = self._search_page  # fuerza construcción si hace falta
-        left, right = sp.get_toolbar_widgets()
-        self._attach_toolbar_widgets(left, right)
-        if not getattr(self, "_search_summary_connected", False):
-            sp.results_summary.connect(self._status_bar_lbl.setText)
-            self._search_summary_connected = True
-        self._toolbar_owner = "search"
-
-    def _ensure_installed_toolbar_attached(self) -> None:
-        """Reparenta el desplegable de fuente + botón de añadir AppImage
-        de InstalledPage a cada lado del cuadro de búsqueda. Comparte las
-        mismas cajas que SearchPage (ver _ensure_search_toolbar_attached),
-        así que al salir de Instaladas el contenido se reemplaza —nunca
-        queda el botón de añadir AppImage visible en otra pestaña."""
-        if getattr(self, "_toolbar_owner", None) == "installed":
-            return
-        ip = self._installed_page  # fuerza construcción si hace falta
-        left, right = ip.get_toolbar_widgets()
-        self._attach_toolbar_widgets(left, right)
-        self._toolbar_owner = "installed"
-
     def _show_search_toolbar(self, visible: bool) -> None:
-        """Los chips/ocultos/orden solo se muestran mientras hay
-        resultados de búsqueda activos (página de resultados) — no
-        cuando la barra está abierta pero aún vacía en Explorar.
-        La barra de estado inferior de la ventana solo tiene contenido
-        aquí (resumen "N paquetes | Flatpak: n XBPS: n"), así que se
-        oculta por completo (no solo el texto) en cualquier otra
-        pantalla, para no dejar una franja vacía reservada abajo."""
-        if visible:
-            self._ensure_search_toolbar_attached()
-        elif getattr(self, "_toolbar_owner", None) == "search":
-            self._search_toolbar_left_box.setVisible(False)
-            self._search_toolbar_right_box.setVisible(False)
-            self._status_bar_lbl.setText("")
-            self._status_bar_widget.setVisible(False)
-            return
-        self._search_toolbar_left_box.setVisible(visible)
-        self._search_toolbar_right_box.setVisible(visible)
+        """Muestra el resumen al buscar; los filtros viven en el menú superior."""
+        if visible and not getattr(self, "_search_summary_connected", False):
+            self._search_page.results_summary.connect(self._status_bar_lbl.setText)
+            self._search_summary_connected = True
         self._status_bar_widget.setVisible(visible)
         if not visible:
             self._status_bar_lbl.setText("")
 
-    def _show_installed_toolbar(self, visible: bool) -> None:
-        """Desplegable de fuente + añadir AppImage de Instaladas: a
-        diferencia de los chips de resultados de SearchPage, estos se
-        muestran de inmediato al abrir la barra de búsqueda en esta
-        página (no dependen de haber escrito nada todavía)."""
-        if visible:
-            self._ensure_installed_toolbar_attached()
-        elif getattr(self, "_toolbar_owner", None) == "installed":
-            self._search_toolbar_left_box.setVisible(False)
-            self._search_toolbar_right_box.setVisible(False)
-            return
-        self._search_toolbar_left_box.setVisible(visible)
-        self._search_toolbar_right_box.setVisible(visible)
-
     def _open_search_bar(self) -> None:
-        current = self._stack.currentIndex()
-        if current == PAGE_INSTALLED:
-            # En Instaladas el desplegable de fuente + añadir AppImage
-            # aparecen de inmediato junto al buscador (no hace falta
-            # esperar a que haya resultados, a diferencia de Explorar/
-            # Buscar).
-            self._show_installed_toolbar(True)
-        else:
-            # Los chips/orden de SearchPage aparecen recién cuando hay
-            # resultados (ver _on_search_enter), no al abrir la barra
-            # todavía vacía.
-            self._show_search_toolbar(False)
+        self._show_search_toolbar(False)
         self._search_bar_row.setVisible(True)
+        self._sync_catalog_options_visibility()
         self._search_edit.clear()
         self._search_edit.setFocus()
 
     def _close_search_bar(self) -> None:
         self._search_bar_row.setVisible(False)
+        self._sync_catalog_options_visibility()
         self._search_edit.clear()
         self._show_search_toolbar(False)
-        self._show_installed_toolbar(False)
         current = self._stack.currentIndex()
         if current == PAGE_SEARCH:
             # Volver a Explorar si estábamos viendo resultados de búsqueda.
@@ -743,18 +767,14 @@ class MainWindow(QMainWindow):
     def _update_search_btn_icon(self, page: int) -> None:
         """El botón de búsqueda de la cabecera cambia de icono y función
         según la página activa: en Actualizaciones se convierte en
-        "comprobar actualizaciones"; en Instaladas, en "más opciones"
-        (revela fuente + añadir AppImage en vez de solo buscar); en el
-        resto, la lupa normal."""
+        "comprobar actualizaciones"; en las demás páginas conserva la
+        función de búsqueda. Los filtros están en el nuevo botón de opciones."""
         if page == PAGE_UPDATES:
             self._search_toggle_btn.setIcon(self._search_btn_icon(True))
             self._search_toggle_btn.setToolTip(tr("applet_check_now"))
             if self._search_bar_row.isVisible():
                 self._search_bar_row.setVisible(False)
                 self._search_edit.clear()
-        elif page == PAGE_INSTALLED:
-            self._search_toggle_btn.setIcon(self._more_options_btn_icon())
-            self._search_toggle_btn.setToolTip(tr("nav_more_options_tooltip"))
         else:
             self._search_toggle_btn.setIcon(self._search_btn_icon(False))
             self._search_toggle_btn.setToolTip(tr("nav_search_tooltip"))
@@ -827,14 +847,9 @@ class MainWindow(QMainWindow):
         """La pestaña antes llamada Pendientes abre solo Actualizaciones."""
         self._nav_to(PAGE_UPDATES)
 
-    def _open_tasks_window(self) -> None:
-        """Abre el gestor de tareas en una ventana independiente."""
-        if self._tasks_window is None:
-            from .tasks_window import TasksWindow
-            self._tasks_window = TasksWindow(self._task_manager, self)
-        self._tasks_window.show()
-        self._tasks_window.raise_()
-        self._tasks_window.activateWindow()
+    def _open_tasks_page(self) -> None:
+        """Abre el gestor de tareas como una página de la ventana principal."""
+        self._nav_to(PAGE_TASKS)
 
     def _on_task_activity_changed(self, _task) -> None:
         self._refresh_task_activity()
@@ -886,11 +901,8 @@ class MainWindow(QMainWindow):
             return False
 
     def _sync_nav_selection(self, page: int | None) -> None:
-        """Refleja qué página está activa en la UI de navegación: las
-        pestañas superiores o los botones de Ajustes/Acerca de."""
+        """Refleja qué página está activa en la navegación superior."""
         nav_page = page
-        if page == PAGE_TASKS:
-            nav_page = PAGE_UPDATES  # misma pestaña unificada
 
         for p, btn in self._nav_buttons.items():
             btn.setChecked(p == nav_page)
@@ -903,8 +915,13 @@ class MainWindow(QMainWindow):
         for btn, btn_page in self._bottom_buttons:
             btn.setChecked(btn_page == page)
 
+        tasks_btn = getattr(self, "_tasks_btn", None)
+        if tasks_btn is not None:
+            tasks_btn.setChecked(page == PAGE_TASKS)
+
         if hasattr(self, "_search_toggle_btn"):
             self._update_search_btn_icon(page if page is not None else -1)
+        self._sync_catalog_options_visibility()
 
     @Slot()
     def _on_home_explore_shown(self):
@@ -928,7 +945,6 @@ class MainWindow(QMainWindow):
             self._search_bar_row.setVisible(False)
             self._search_edit.clear()
             self._show_search_toolbar(False)
-            self._show_installed_toolbar(False)
         self._sync_nav_selection(page)
         self._prev_page = self._stack.currentIndex()
 
@@ -939,6 +955,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda p=page: self._finish_nav(p))
         else:
             self._stack.setCurrentIndex(page)
+        self._sync_catalog_options_visibility()
 
     def _finish_nav(self, page: int):
         """Called after placeholder is visible — builds the real page.
@@ -1193,6 +1210,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if not self._has_work_in_progress():
+            search_page = self._pages[PAGE_SEARCH]
+            if search_page is not None:
+                search_page.shutdown_workers()
             event.accept()
             return
         from PySide6.QtWidgets import QMessageBox
@@ -1204,6 +1224,9 @@ class MainWindow(QMainWindow):
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
+            search_page = self._pages[PAGE_SEARCH]
+            if search_page is not None:
+                search_page.shutdown_workers()
             event.accept()
         else:
             event.ignore()

@@ -46,16 +46,6 @@ class TaskWorker(QThread):
 
     def run(self):
         from . import flatpak_backend
-        from . import admin_session
-        try:
-            import core.settings as _app_settings
-            configured_mode = _app_settings.get("admin_expiry_mode", "always")
-            configured_minutes = int(_app_settings.get("admin_expiry_custom_minutes", 5))
-            current = admin_session.session()
-            if current.mode != configured_mode or current.custom_minutes != configured_minutes:
-                admin_session.configure(configured_mode, configured_minutes)
-        except Exception:
-            admin_session.configure("always", 5)
         try:
             from . import xbps_backend as _xbps
         except ImportError:
@@ -114,8 +104,6 @@ class TaskWorker(QThread):
             return
 
         success = task.state == TaskState.DONE
-        if success and task.task_type != TaskType.REFRESH:
-            admin_session.mark_authenticated()
         self.task_finished.emit(
             task.id,
             success,

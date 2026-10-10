@@ -123,8 +123,12 @@ def _installed_ids() -> set[str]:
             [_FLATPAK, "list", "--app", "--columns=application"],
             capture_output=True, text=True, timeout=10,
         )
+        if r.returncode != 0:
+            print(f"[flatpak] list --app falló ({r.returncode}): {(r.stderr or '').strip()}")
+            return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
-    except Exception:
+    except Exception as e:
+        print(f"[flatpak] No se pudieron consultar los IDs instalados: {e}")
         return set()
 
 
@@ -136,15 +140,19 @@ def _search_via_cli(query: str, limit: int = 5000) -> List[Package]:
     try:
         # Force explicit column order — never rely on default output format
         # which varies between flatpak versions and distros.
-        # Columns: name | description | application ID | version
+        # Columns: name | description | application ID | version | remotes
         r = subprocess.run(
             [_FLATPAK, "search",
-             "--columns=name,description,application,version",
+             "--columns=name,description,application,version,remotes",
              query],
             capture_output=True, text=True, timeout=15,
         )
     except Exception as e:
         print(f"[flatpak] Error en CLI search: {e}")
+        return []
+
+    if r.returncode != 0:
+        print(f"[flatpak] flatpak search falló ({r.returncode}): {(r.stderr or '').strip()}")
         return []
 
     installed = _installed_ids()
@@ -166,15 +174,14 @@ def _search_via_cli(query: str, limit: int = 5000) -> List[Package]:
         description = parts[1].strip() if len(parts) > 1 else ""
         app_id      = parts[2].strip() if len(parts) > 2 else ""
         version     = parts[3].strip() if len(parts) > 3 else ""
+        remotes     = parts[4].strip() if len(parts) > 4 else ""
 
         if not app_id or not name:
             continue
 
-        # not user-installable applications (app_id has ≥4 dot-segments).
-        if app_id.count(".") >= 3:
-            continue
-
-        # Also skip by well-known extension markers in the app_id
+        # Un ID con muchos segmentos no implica que sea una extensión:
+        # aplicaciones normales (incluidas las no verificadas) también
+        # pueden tener IDs largos. Filtrar solo los marcadores conocidos.
         _lower_id = app_id.lower()
         if any(tok in _lower_id for tok in (
             ".plugin.", ".codec.", ".locale.", ".debug.",
@@ -188,8 +195,14 @@ def _search_via_cli(query: str, limit: int = 5000) -> List[Package]:
 
         status = PackageStatus.INSTALLED if app_id in installed else PackageStatus.NOT_INSTALLED
 
+        # El nombre del app-id resuelve el icono del sistema si la app ya
+        # está instalada; para Flathub descargamos la imagen de AppStream
+        # de forma asíncrona y la cachea AppIconWidget.
+        remote_names = [item.strip().split()[0] for item in remotes.split(",") if item.strip()]
+        remote = "flathub" if "flathub" in remote_names else (remote_names[0] if remote_names else "")
         icon_url = (
             f"https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/{app_id}.png"
+            if remote == "flathub" else ""
         )
 
         packages.append(Package(
@@ -200,10 +213,11 @@ def _search_via_cli(query: str, limit: int = 5000) -> List[Package]:
             version=version,
             source=PackageSource.FLATPAK,
             status=status,
-            icon_name="application-x-executable",
+            icon_name=app_id,
             icon_url=icon_url,
             appstream_id=app_id,
             category="Other",
+            tags=[f"_flatpak_remote:{remote}"] if remote else [],
         ))
 
         if len(packages) >= limit:
@@ -305,7 +319,12 @@ def list_installed() -> List[Package]:
              "--columns=application,name,version,installation"],
             capture_output=True, text=True, timeout=10,
         )
-    except Exception:
+    except Exception as e:
+        print(f"[flatpak] No se pudieron listar las aplicaciones instaladas: {e}")
+        return []
+
+    if r.returncode != 0:
+        print(f"[flatpak] flatpak list falló ({r.returncode}): {(r.stderr or '').strip()}")
         return []
 
     packages = []
@@ -326,7 +345,7 @@ def list_installed() -> List[Package]:
             version=version,
             source=PackageSource.FLATPAK,
             status=PackageStatus.INSTALLED,
-            icon_name="application-x-executable",
+            icon_name=app_id,
             icon_url=icon_url,
             appstream_id=app_id,
         ))
@@ -384,8 +403,18 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
 
     if task.task_type == TaskType.INSTALL:
         remotes = list_remotes()
+        # Preferir el remote exacto del resultado de búsqueda; evita que
+        # --noninteractive falle o instale desde otro origen si el app-id
+        # existe en varios repositorios.
+        source_remote = next(
+            (tag.split(":", 1)[1] for tag in task.package.tags
+             if tag.startswith("_flatpak_remote:") and tag.split(":", 1)[1] in remotes),
+            "",
+        )
         preferred = (app_settings.get("flatpak_default_remote", "") or "").strip()
-        if preferred not in remotes:
+        if source_remote:
+            preferred = source_remote
+        elif preferred not in remotes:
             preferred = ""
         if not preferred:
             known_available = [name for name in KNOWN_REMOTES if name in remotes]
@@ -554,8 +583,12 @@ def list_remotes() -> set[str]:
         )
         if r.returncode != 0:
             return set()
+        if r.returncode != 0:
+            print(f"[flatpak] list --app falló ({r.returncode}): {(r.stderr or '').strip()}")
+            return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
-    except Exception:
+    except Exception as e:
+        print(f"[flatpak] No se pudieron consultar los IDs instalados: {e}")
         return set()
 
 

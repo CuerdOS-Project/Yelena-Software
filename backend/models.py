@@ -10,7 +10,7 @@ class PackageSource(Enum):
     FLATPAK  = "flatpak"
     XBPS     = "xbps"
     LOCAL    = "local"     # paquete local (.xbps)
-    APPIMAGE = "appimage"  # AppImage gestionado vía FPM
+    APPIMAGE = "appimage"  # AppImage gestionado con el subcomando aimg de FPM
 
 
 class PackageStatus(Enum):
@@ -62,6 +62,7 @@ class Package:
     screenshots: List[str] = field(default_factory=list)
     rating: float = 0.0
     appstream_id: str = ""
+    architecture: str = ""
     featured: bool = False
     top_app: bool = False
     # (case-sensitive, p.ej. "Thunar" o "Signal-Desktop"). Si está vacío,
@@ -69,6 +70,8 @@ class Package:
     # Ruta a un archivo local usado como origen de instalación/actualización
     # (ej. un .AppImage elegido por el usuario). Vacío si no aplica.
     source_path: str = ""
+    # Repositorio XBPS de procedencia (current, nonfree, multilib, CuerdOS...).
+    repository: str = ""
 
     @property
     def size_str(self) -> str:
@@ -122,6 +125,33 @@ class Package:
             PackageStatus.INSTALLED,
             PackageStatus.UPDATE_AVAILABLE,
         )
+
+    @property
+    def icon_fallback_name(self) -> str:
+        """Icono de respaldo común cuando no existe el icono específico.
+
+        En XBPS se prefiere el icono neutro de paquete sobre un símbolo de
+        categoría; las demás fuentes conservan el fallback de categoría.
+        """
+        if self.source == PackageSource.XBPS:
+            return "package-x-generic"
+        for tag in self.tags:
+            if tag.startswith("_category_icon:"):
+                return tag[len("_category_icon:"):]
+        return ""
+
+    @property
+    def is_32bit(self) -> bool:
+        """True solo con metadatos explícitos o un sufijo de paquete inequívoco."""
+        arch = (self.architecture or "").strip().lower().replace("-", "_")
+        if arch in {"i386", "i486", "i586", "i686", "x86_32", "x86_32bit", "32", "32bit", "32_bit"}:
+            return True
+        if any(tag.strip().lower() in {"32bit", "32-bit", "arch:32", "arch:i686", "architecture:i686"} for tag in self.tags):
+            return True
+        # Convención explícita usada por algunos repositorios para variantes
+        # de 32 bits; no inferir arquitectura de subcadenas como "lib".
+        name = (self.pkgname or self.name).strip().lower()
+        return name.endswith(("-32bit", "-i686", "-i386"))
 
 
 @dataclass

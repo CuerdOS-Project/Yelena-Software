@@ -5,14 +5,6 @@ Principios de seguridad:
 * Nunca solicita, recibe, cifra, descifra ni almacena contraseñas.
 * Nunca usa shell, sudo, doas, gksu ni ejecuta comandos arbitrarios.
 * Solo permite xbps-install, xbps-remove y xbps-reconfigure mediante pkexec.
-* La política instalada usa `auth_admin` (sin `_keep`) para las tres acciones:
-  cada pkexec exige autenticación propia. La opción "recordar contraseña"
-  de Ajustes (backend/admin_session.py) todavía no tiene un mecanismo real
-  que la haga efectiva a nivel de polkit (el archivo referenciado en
-  POLICY_RULE nunca se genera ni se instala) — usarla no debe interpretarse
-  como una ventana de gracia garantizada. Antes la política usaba
-  `auth_admin_keep`, lo que hacía que polkitd reutilizara la autenticación
-  por su cuenta incluso con "Siempre preguntar" seleccionado en Ajustes.
 
 Este archivo es deliberadamente independiente y puede copiarse a otras
 herramientas de CuerdOS. La GUI debe pasar listas de argumentos, nunca una
@@ -23,20 +15,16 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import stat
 import subprocess
+import threading
 from pathlib import Path
 from typing import Sequence
 
-CACHE_SECONDS = 300
-POLICY_RULE = Path("/etc/polkit-1/rules.d/50-yelena-xbps.rules")
-POLICY_ACTION_NAMES = (
-    Path("/etc/polkit-1/actions/org.ylsoft.policy"),
-    Path("/usr/share/polkit-1/actions/org.ylsoft.policy"),
-)
+POLICY_TARGET = Path("/usr/share/polkit-1/actions/org.ylsoft.policy")
 _POLICY_SOURCE = Path(__file__).resolve().parents[1] / "resources" / "polkit" / "yl-soft.policy"
-POLICY_VERSION = "3"
-_POLICY_MARKER = f"agent-yelena-policy-version={POLICY_VERSION}"
+_POLICY_MARKER = "agent-yelena-policy-version=6"
+_ensure_lock = threading.Lock()
+_ensure_done = False
 
 _OPERATION_BINARIES = {
     "install": "xbps-install",
@@ -62,69 +50,39 @@ class AgentError(RuntimeError):
     """Error seguro y esperable del agente."""
 
 
-def _root_owned_0644(path: Path) -> bool:
-    """Comprueba el formato de permisos solicitado para una política."""
+def _policy_ok() -> bool:
     try:
-        st = path.stat()
+        return _POLICY_MARKER in POLICY_TARGET.read_text(encoding="utf-8")
     except OSError:
         return False
-    return (
-        stat.S_ISREG(st.st_mode)
-        and stat.S_IMODE(st.st_mode) == 0o644
-        and st.st_uid == 0
-        and st.st_gid == 0
-    )
 
 
-def policy_rule_is_well_formed(path: Path = POLICY_RULE) -> bool:
-    """Valida presencia, tipo, propietario y modo de la regla local.
+def ensure_policy() -> None:
+    """Instala la política polkit si falta o es antigua (una vez por ejecución).
 
-    Esto no pretende afirmar que polkitd ya la haya cargado: solo polkitd
-    puede validar/cargar una regla JavaScript. La aplicación no debe habilitar
-    una caché propia basándose en esta función.
+    Se llama antes de la primera acción privilegiada: esa propia acción pide
+    la contraseña de administrador para copiar la política y, desde entonces,
+    pkexec usa las acciones org.ylsoft.xbps.* (auth_admin_keep). Si se cancela
+    o falla, la operación continúa con la autenticación genérica de pkexec.
     """
-    return _root_owned_0644(path)
-
-
-def policy_action_is_installed() -> bool:
-    """Indica si existe una política de acción con metadatos seguros."""
-    return any(_root_owned_0644(path) for path in POLICY_ACTION_NAMES)
-
-
-def policy_action_is_current() -> bool:
-    """Comprueba que la política instalada no sea de una versión antigua."""
-    if not policy_action_is_installed():
-        return False
-    for path in POLICY_ACTION_NAMES:
+    global _ensure_done
+    with _ensure_lock:
+        if _ensure_done:
+            return
+        _ensure_done = True
+        if _policy_ok() or not _POLICY_SOURCE.is_file():
+            return
+        pkexec, installer = shutil.which("pkexec"), shutil.which("install")
+        if not pkexec or not installer:
+            return
         try:
-            if _root_owned_0644(path) and _POLICY_MARKER in path.read_text(encoding="utf-8"):
-                return True
-        except (OSError, UnicodeError):
+            subprocess.run(
+                [pkexec, installer, "-D", "-o", "root", "-g", "root", "-m", "0644",
+                 str(_POLICY_SOURCE), str(POLICY_TARGET)],
+                shell=False, close_fds=True, check=False,
+            )
+        except OSError:
             pass
-    return False
-
-
-def policy_present() -> bool:
-    """Compatibilidad: exige la regla solicitada o una acción instalada."""
-    return policy_rule_is_well_formed() or policy_action_is_installed()
-
-
-def is_installed() -> bool:
-    """API compatible con Settings: solo informa del estado de la política."""
-    return policy_present()
-
-
-def install() -> tuple[bool, str]:
-    """Instala o actualiza la política con pkexec, sin capturar credenciales."""
-    was_old = policy_action_is_installed() and not policy_action_is_current()
-    try:
-        result = install_policy(_POLICY_SOURCE)
-    except (AgentError, OSError) as exc:
-        return False, str(exc)
-    if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "La instalación fue cancelada o falló.").strip()
-    return True, ("Políticas antiguas de agent-yelena actualizadas correctamente."
-                  if was_old else "Políticas de agent-yelena instaladas correctamente.")
 
 
 def _binary(operation: str) -> str:
@@ -217,6 +175,7 @@ def build_privileged_command(binary: str, args: Sequence[str]) -> list[str]:
 def run(operation: str, args: Sequence[str], **kwargs) -> subprocess.CompletedProcess[str]:
     """Ejecuta una operación XBPS sin shell y deja autenticar a pkexec."""
     command = build_command(operation, args)
+    ensure_policy()
     kwargs.setdefault("text", True)
     kwargs.setdefault("check", False)
     kwargs.setdefault("close_fds", True)
@@ -227,40 +186,16 @@ def run(operation: str, args: Sequence[str], **kwargs) -> subprocess.CompletedPr
 def popen(operation: str, args: Sequence[str], **kwargs) -> subprocess.Popen[str]:
     """Inicia XBPS para streaming de salida, también sin shell."""
     command = build_command(operation, args)
+    ensure_policy()
     kwargs.setdefault("text", True)
     kwargs.setdefault("close_fds", True)
     kwargs["shell"] = False
     return subprocess.Popen(command, **kwargs)
 
 
-def install_policy(source: Path) -> subprocess.CompletedProcess[str]:
-    """Instala una política ya empaquetada usando ``pkexec install``.
-
-    No usa ``sh -c``. La fuente debe ser un archivo regular; la operación de
-    instalación solo escribe en una ruta fija de polkit.
-    """
-    source = source.resolve()
-    if not source.is_file() or "\x00" in str(source):
-        raise AgentError("Fuente de política inválida")
-    target = Path("/usr/share/polkit-1/actions/org.ylsoft.policy")
-    pkexec = shutil.which("pkexec")
-    installer = shutil.which("install")
-    if not pkexec or not installer:
-        raise AgentError("Se requieren pkexec e install")
-    return subprocess.run(
-        [pkexec, installer, "-o", "root", "-g", "root", "-m", "0644", str(source), str(target)],
-        shell=False, close_fds=True, text=True, check=False,
-    )
-
-
 __all__ = [
-    "AgentError", "CACHE_SECONDS", "POLICY_RULE", "POLICY_VERSION", "policy_present",
-    "policy_action_is_current",
-    "policy_rule_is_well_formed", "policy_action_is_installed",
-    "is_installed", "install",
-    "build_command", "build_xbps_command", "build_privileged_command",
-    "authorize",
-    "run", "popen", "install_policy",
+    "AgentError", "build_command", "build_xbps_command", "ensure_policy",
+    "build_privileged_command", "authorize", "run", "popen",
 ]
 
 if __name__ == "__main__":

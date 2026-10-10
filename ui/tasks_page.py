@@ -950,8 +950,8 @@ class TaskDetail(QWidget):
 class TasksPage(QWidget):
     """
     Gestor de tareas: historial a la izquierda y detalle con salida en vivo
-    a la derecha. Se usa tanto en la ventana independiente (TasksWindow)
-    como embebida (show_header=False).
+    a la derecha. Se integra como página en la ventana principal; conserva
+    show_header=False para incrustaciones compactas.
     """
 
     active_count_changed = Signal(int)

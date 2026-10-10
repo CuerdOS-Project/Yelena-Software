@@ -1,4 +1,4 @@
-# Yelena Software
+# Yelena Software — Pre-Stable v1.0.2
 
 Un **centro de software** para sistemas basados en **Void Linux**, diseñado alrededor de **XBPS** (X Binary Package System). **Yelena Software** utiliza **Python** y **PySide6** para ofrecer una interfaz visual ligera que reúne una **tienda de aplicaciones**, un **gestor de actualizaciones** y diversas **utilidades de paquetería**.
 
@@ -62,6 +62,7 @@ Funciones principales:
 ```
 
 Las operaciones de instalación, eliminación y actualización pueden solicitar permisos administrativos mediante polkit, `pkexec`, `sudo` o `doas`, según la configuración del sistema.
+
 
 
 ## Licencia

@@ -162,6 +162,7 @@ def _make_package(d: dict, lang: str = "es") -> Package:
         category=d.get("category", "Other"),
         size_bytes=size_bytes,
         appstream_id=appstream_id,
+        architecture=d.get("architecture", d.get("arch", "")),
         developer=d.get("developer", ""),
         website=d.get("website", ""),
         license=d.get("license", ""),
@@ -170,7 +171,39 @@ def _make_package(d: dict, lang: str = "es") -> Package:
         featured=d.get("featured", "false").lower() == "true",
         top_app=d.get("top_app", "false").lower() == "true",
         pkgname=pkgname,
+        repository=d.get("repository", "current" if raw_src == "xbps" else ""),
     )
+
+
+# Aplicaciones conocidas que deben tener prioridad en la portada. El resto
+# del catálogo sigue disponible debajo, ordenado por valoración y nombre.
+HOME_KNOWN_APP_ORDER = (
+    "xbps:firefox",
+    "xbps:vlc",
+    "xbps:libreoffice",
+    "xbps:vivaldi",
+    "xbps:gimp",
+    "xbps:obs",
+    "xbps:chromium",
+    "xbps:thunderbird",
+    "xbps:blender",
+    "xbps:krita",
+    "xbps:audacity",
+    "xbps:qbittorrent",
+)
+
+
+def rank_home_apps(packages: List[Package], limit: int = 30) -> List[Package]:
+    """Pone primero apps conocidas disponibles; mantiene el resto del catálogo."""
+    by_id: Dict[str, Package] = {}
+    for package in packages:
+        by_id.setdefault(package.id, package)
+
+    selected = [by_id[app_id] for app_id in HOME_KNOWN_APP_ORDER if app_id in by_id]
+    selected_ids = {package.id for package in selected}
+    remainder = [package for pkg_id, package in by_id.items() if pkg_id not in selected_ids]
+    remainder.sort(key=lambda package: (-package.rating, package.name.casefold()))
+    return (selected + remainder)[:max(0, limit)]
 
 
 # Normalisation helper

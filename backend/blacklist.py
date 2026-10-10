@@ -26,6 +26,12 @@ _xbps_rules_name: List[str] = []
 _xbps_loaded      = False
 _xbps_mtime: Optional[float] = None
 
+# Aplicaciones de usuario que comparten prefijo con reglas amplias para
+# bibliotecas/componentes del sistema. Las excepciones deben revisarse si se
+# agregan nuevas reglas wildcard a blacklist_xbps.kn.
+_LIBRARY_PREFIX_APP_ALLOWLIST = {"libreoffice", "librewolf"}
+_XBPS_APP_ALLOWLIST = _LIBRARY_PREFIX_APP_ALLOWLIST | {"kdenlive"}
+
 
 def _parse_file(path: Path) -> tuple[List[str], List[str], List[str]]:
     """Parse a .kn blacklist file and return (name_patterns, id_patterns, cat_patterns)."""
@@ -113,6 +119,8 @@ def is_blacklisted(pkg: Package) -> bool:
 
 def _is_blacklisted_xbps(pkg: Package) -> bool:
     """Check XBPS package against blacklist_xbps.kn."""
+    if pkg.name.lower() in _XBPS_APP_ALLOWLIST:
+        return False
     _load_xbps()
     if _xbps_rules_name and _matches_any(pkg.name, _xbps_rules_name):
         return True
@@ -121,6 +129,9 @@ def _is_blacklisted_xbps(pkg: Package) -> bool:
 
 def _is_blacklisted_flatpak(pkg: Package) -> bool:
     """Check Flatpak package against blacklist.kn."""
+    # Estos son nombres de aplicaciones de usuario, no librerías del sistema.
+    if pkg.name.strip().lower() in _LIBRARY_PREFIX_APP_ALLOWLIST:
+        return False
     _load()
 
     if _rules_name and _matches_any(pkg.name, _rules_name):
@@ -132,9 +143,6 @@ def _is_blacklisted_flatpak(pkg: Package) -> bool:
     if _rules_id and pkg.appstream_id and _matches_any(pkg.appstream_id, _rules_id):
         return True
 
-    # Flatpak extensions: ≥4 dot-segments in appstream_id → always block
-    if pkg.appstream_id and pkg.appstream_id.count(".") >= 3:
-        return True
 
     if _rules_cat and pkg.category.lower() in _rules_cat:
         return True

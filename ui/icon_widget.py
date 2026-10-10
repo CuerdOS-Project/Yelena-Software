@@ -68,6 +68,19 @@ _CACHE_DIR = Path(os.path.expanduser("~/.cache/vera_shop/icons"))
 # Global cache: theme icon name → QPixmap (hit) or None (miss).
 _ICON_CACHE: dict[str, "QPixmap | None"] = {}
 
+# Las tarjetas de resultados se recrean con frecuencia al escribir. Mantener
+# las descargas vivas fuera del widget evita destruir su QThread antes de que
+# termine si la tarjeta desaparece mientras baja el icono.
+_ACTIVE_ICON_THREADS: set = set()
+_ICON_QUIT_HOOK_CONNECTED = False
+
+
+def _wait_for_icon_threads() -> None:
+    for thread in list(_ACTIVE_ICON_THREADS):
+        if thread.isRunning():
+            thread.wait()
+    _ACTIVE_ICON_THREADS.clear()
+
 
 class _IconLoadScheduler:
     """
@@ -308,8 +321,17 @@ class AppIconWidget(QLabel):
 
     def _start_download(self, dest: Path):
         """Start a background download thread for the icon URL."""
+        global _ICON_QUIT_HOOK_CONNECTED
         self._dl_thread = _IconDownloadThread(self._icon_url, dest)
         self._dl_thread.done.connect(self._on_download_done)
+        thread = self._dl_thread
+        _ACTIVE_ICON_THREADS.add(thread)
+        thread.finished.connect(lambda t=thread: _ACTIVE_ICON_THREADS.discard(t))
+        if not _ICON_QUIT_HOOK_CONNECTED:
+            app = QGuiApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(_wait_for_icon_threads)
+                _ICON_QUIT_HOOK_CONNECTED = True
         self._dl_thread.start()
 
     def _on_download_done(self, path: str):

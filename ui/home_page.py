@@ -20,14 +20,12 @@ from .native_widgets import (
     CategoryTileButton, CategoryPill, attach_hover_lift,
 )
 from core.i18n import tr, tr_category, get_current_language
+from core.catalog import rank_home_apps
 
 
 def _pkg_fallback_icon(pkg: Package) -> str:
-    """Extrae el icono de categoría guardado en los tags del paquete."""
-    for tag in pkg.tags:
-        if tag.startswith("_category_icon:"):
-            return tag[len("_category_icon:"):]
-    return ""
+    """Fallback coherente por fuente, centralizado en Package."""
+    return pkg.icon_fallback_name
 
 
 def _child_is_button(widget, pos) -> bool:
@@ -248,6 +246,11 @@ class AppCard(CardFrame):
 
         badge = BadgeLabel(pkg.source_label, pkg.badge_type, show_icon=False)
         top.addWidget(badge)
+        if pkg.is_32bit:
+            top.addWidget(BadgeLabel(
+                tr("badge_32bit"), "architecture",
+                tooltip=tr("warning_32bit"), show_icon=False,
+            ))
         layout.addLayout(top)
 
         # El nombre ocupa una línea y se elide si no cabe.
@@ -741,11 +744,11 @@ class HomePage(QWidget):
         self._stack.setCurrentIndex(self._PAGE_CONTENT)
 
     def _render_top_apps(self, apps: List[Package]):
-        """Muestra hasta 3 apps top_app = true (Vivaldi, VLC, LibreOffice)
-        como páginas de un único carrusel de banners."""
-        top_names = ["vivaldi", "vlc", "libreoffice"]
-        by_name = {p.name.strip().lower(): p for p in apps if getattr(p, "top_app", False)}
-        top_pkgs = [by_name[n] for n in top_names if n in by_name]
+        """Rota aplicaciones conocidas marcadas top_app en el catálogo."""
+        top_pkgs = rank_home_apps(
+            [package for package in apps if getattr(package, "top_app", False)],
+            limit=8,
+        )
 
         if not top_pkgs:
             self._top_apps_carousel.setVisible(False)
@@ -789,12 +792,7 @@ class HomePage(QWidget):
         """Las apps más populares para "Explorar apps" (antes mostraba la
         biblioteca completa filtrable por categoría; ahora eso vive en las
         páginas de categoría, y aquí solo entran las top N)."""
-        ranked = sorted(
-            self._all_packages,
-            key=lambda p: (getattr(p, "rating", 0.0), p.name.lower()),
-            reverse=True,
-        )
-        return ranked[:_POPULAR_APPS_LIMIT]
+        return rank_home_apps(self._all_packages, limit=_POPULAR_APPS_LIMIT)
 
     def _compute_cols(self) -> int:
         w = self._content_width()

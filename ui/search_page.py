@@ -22,10 +22,7 @@ from .native_widgets import (
 _SEARCH_LIMIT = 5000
 
 def _pkg_fallback_icon(pkg: Package) -> str:
-    for tag in pkg.tags:
-        if tag.startswith("_category_icon:"):
-            return tag[len("_category_icon:"):]
-    return ""
+    return pkg.icon_fallback_name
 
 
 def _fmt_size(size_bytes: int) -> str:
@@ -145,6 +142,12 @@ class SearchResultCard(CardFrame):
 
         name_row.addWidget(BadgeLabel(pkg.source_label, pkg.badge_type, show_icon=False))
 
+        if pkg.is_32bit:
+            name_row.addWidget(BadgeLabel(
+                tr("badge_32bit"), "architecture",
+                tooltip=tr("warning_32bit"), show_icon=False,
+            ))
+
         if pkg.is_installed:
             name_row.addWidget(BadgeLabel(tr("badge_installed"), "installed", show_icon=False))
 
@@ -225,6 +228,10 @@ class SearchPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: SearchWorker | None = None
+        # Se retienen workers cancelados hasta que realmente finalicen.
+        # flatpak search puede tardar varios segundos; destruir el QThread
+        # tras un wait corto provoca "QThread: Destroyed while thread is still running".
+        self._workers: list[SearchWorker] = []
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(350)
@@ -251,7 +258,8 @@ class SearchPage(QWidget):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 
-        # MainWindow dispone estos filtros en la barra de búsqueda compartida.
+        # Controles de filtro/orden ocultos visualmente; el menú superior
+        # los lee y cambia sus selecciones para reutilizar la lógica existente.
         left = QWidget()
         left.setObjectName("searchToolbarLeft")
         left_lay = QHBoxLayout(left)
@@ -314,6 +322,10 @@ class SearchPage(QWidget):
 
         self._toolbar_left = left
         self._toolbar_right = right
+        # Los controles siguen disponibles para el menú superior, pero ya
+        # no se reparentan a la fila de búsqueda.
+        left.setVisible(False)
+        right.setVisible(False)
 
         # Barra fina que se desliza izq/der mientras hay una búsqueda
         # activa — único indicador de "cargando" que queda en esta
@@ -341,11 +353,15 @@ class SearchPage(QWidget):
 
         self._grid_columns = 1
         self._last_results: List[Package] = []
+        self._render_queue: List[Package] = []
+        self._render_index = 0
+        self._render_batch_size = 24
+        self._render_timer = QTimer(self)
+        self._render_timer.setInterval(8)
+        self._render_timer.timeout.connect(self._process_render_batch)
 
     def get_toolbar_widgets(self) -> tuple[QWidget, QWidget]:
-        """(izquierda, derecha): chips de fuente / ocultos+orden —
-        MainWindow los coloca a cada lado del cuadro de búsqueda,
-        mostrándolos solo mientras hay resultados de búsqueda activos."""
+        """Compatibilidad: devuelve los contenedores ocultos de los filtros."""
         return self._toolbar_left, self._toolbar_right
 
     def resizeEvent(self, event):
@@ -456,17 +472,38 @@ class SearchPage(QWidget):
 
         # Cancelar worker anterior
         if self._worker is not None:
-            self._worker.source_ready.disconnect()
-            self._worker.all_done.disconnect()
-            self._worker.requestInterruption()
-            if self._worker.isRunning():
-                self._worker.wait(400)
+            old_worker = self._worker
+            try:
+                old_worker.source_ready.disconnect(self._on_source_ready)
+                old_worker.all_done.disconnect(self._on_all_done)
+            except (RuntimeError, TypeError):
+                pass
+            old_worker.requestInterruption()
+
+        worker = SearchWorker(q, parent=self)
+        self._worker = worker
+        self._workers.append(worker)
+        worker.source_ready.connect(self._on_source_ready)
+        worker.all_done.connect(self._on_all_done)
+        worker.finished.connect(lambda w=worker: self._retire_worker(w))
+        worker.start()
+
+    def _retire_worker(self, worker: SearchWorker) -> None:
+        if worker in self._workers and not worker.isRunning():
+            self._workers.remove(worker)
+        if self._worker is worker:
             self._worker = None
 
-        self._worker = SearchWorker(q, parent=self)
-        self._worker.source_ready.connect(self._on_source_ready)
-        self._worker.all_done.connect(self._on_all_done)
-        self._worker.start()
+    def shutdown_workers(self) -> None:
+        """Interrumpe y espera todos los workers antes de destruir la página."""
+        workers = list(self._workers)
+        for worker in workers:
+            worker.requestInterruption()
+        for worker in workers:
+            if worker.isRunning():
+                worker.wait()
+        self._workers.clear()
+        self._worker = None
 
     @Slot(str, list)
     def _on_source_ready(self, source_key: str, packages: List[Package]):
@@ -558,6 +595,9 @@ class SearchPage(QWidget):
         self._render_results(filtered)
 
     def _clear_results(self):
+        self._render_timer.stop()
+        self._render_queue.clear()
+        self._render_index = 0
         while self._results_layout.count():
             item = self._results_layout.takeAt(0)
             if item.widget():
@@ -566,12 +606,26 @@ class SearchPage(QWidget):
     def _render_results(self, results: List[Package]):
         self._last_results = results
         self._clear_results()
+        self._render_queue = list(results)
+        if self._render_queue:
+            self._render_timer.start()
+
+    def _process_render_batch(self) -> None:
+        """Crea unas pocas tarjetas por turno para mantener fluida la GUI."""
         cols = max(1, self._grid_columns)
-        for i, pkg in enumerate(results):
+        end = min(self._render_index + self._render_batch_size, len(self._render_queue))
+        for i in range(self._render_index, end):
+            pkg = self._render_queue[i]
             card = SearchResultCard(pkg)
             card.clicked.connect(self.app_selected)
             row, col = divmod(i, cols)
+            card.setFixedWidth(self._search_card_width())
             self._results_layout.addWidget(card, row, col)
+        self._render_index = end
         for c in range(cols):
             self._results_layout.setColumnStretch(c, 1)
-        self._update_search_card_widths()
+        if self._render_index >= len(self._render_queue):
+            self._render_timer.stop()
+            self._render_queue.clear()
+            self._render_index = 0
+            self._update_search_card_widths()
