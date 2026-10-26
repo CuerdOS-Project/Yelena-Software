@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Yelena Software Applet
+Comment=Notifica actualizaciones del sistema y de Flatpak
+Exec=yl-soft-applet
+Icon=system-software-update
+Terminal=false
+Categories=System;PackageManager;
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+StartupNotify=false
+
+Actions=OpenStore;
+
+[Desktop Action OpenStore]
+Name=Abrir Yelena Software
+Exec=yl-soft --updates
