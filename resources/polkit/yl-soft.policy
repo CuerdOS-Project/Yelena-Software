@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <!-- agent-yelena-policy-version=7 -->
+  <vendor>agent-yelena</vendor>
+  <vendor_url>https://github.com/cuerdos/yl-soft</vendor_url>
+
+  <action id="org.ylsoft.xbps.install">
+    <description>agent-yelena — instalar o actualizar paquetes</description>
+    <message>agent-yelena necesita permiso para instalar o actualizar paquetes.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/xbps-install</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="org.ylsoft.xbps.remove">
+    <description>agent-yelena — eliminar paquetes</description>
+    <message>agent-yelena necesita permiso para eliminar paquetes.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/xbps-remove</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <action id="org.ylsoft.xbps.reconfigure">
+    <description>agent-yelena — reconfigurar paquetes</description>
+    <message>agent-yelena necesita permiso para reconfigurar paquetes.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/xbps-reconfigure</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <!-- Autorización única para los `sudo` internos de AM/AppMan (am-FUSION).
+       El broker se lanza como `pkexec /usr/bin/python3 -I -c ...`; argv1 = -I
+       limita la acción a ese modo aislado de Python. -->
+  <action id="org.ylsoft.appimage.broker">
+    <description>agent-yelena — gestionar AppImages (am-FUSION)</description>
+    <message>agent-yelena necesita permiso para instalar, actualizar o eliminar AppImages de am-FUSION.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/python3</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">-I</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>
