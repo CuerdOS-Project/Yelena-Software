@@ -1,1 +1,0 @@
-"""Yelena Software backend package."""
