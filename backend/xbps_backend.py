@@ -618,7 +618,7 @@ def run_task(task: Task) -> Iterator[tuple[int, str]]:
                     )
                 except Exception:
                     pass
-            yield (97, "Base de datos de paquetes XBPS actualizada.")
+            yield (97, "Lista de paquetes de CuerdOS actualizada.")
         yield (100, "Done.")
         task.state = TaskState.DONE
     else:
@@ -740,7 +740,7 @@ def get_updates() -> List[dict]:
             "arch":            arch,
             "download_size":   0,
             "install_size":    0,
-            "repo":            "XBPS",
+            "repo":            "CuerdOS",
             "icon_name":       _guess_icon(name),
         })
 

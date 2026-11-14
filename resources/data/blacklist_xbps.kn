@@ -37,12 +37,14 @@ name:yelena-software
 name:k-hello
 name:kron-installer
 name:runittools
+name:oomox-*
 
 # ── KERNELS E INITRAMFS ──────────────────────────────────────
 name:linux
 name:linux-headers
 name:linux5.*
 name:linux6.*
+name:linux7.*
 name:linux-lts
 name:linux-mainline
 name:linux-voidlinux
@@ -760,3 +762,30 @@ name:zlib-ng
 name:zxcvbn-c
 name:zxing-cpp
 name:0ad-*
+name:7zip
+name:SDL2_mixer
+name:binwalk
+name:blas
+name:cabextract
+name:coin-*
+name:cuerdos-pigments-*
+name:fonttools
+name:gnome-menus
+name:gobject-*
+name:gst-*
+name:gst1-*
+name:lapack
+name:llvm-libunwind
+name:ldc-runtime
+name:mtpfs
+name:portaudio-cpp
+name:pugixml
+name:smpeg2
+name:socklog
+name:vala
+name:wine-*
+name:xfwl4
+name:xfwm4
+name:zenity
+name:xournal
+name:deadbeef-*

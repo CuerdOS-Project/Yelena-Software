@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from typing import Iterator, List, Optional
@@ -15,6 +16,7 @@ import core.settings as app_settings
 
 _FLATPAK = shutil.which("flatpak")
 _FLATHUB_API = "https://flathub.org/api/v1"  # Cambiado a v1
+_logger = logging.getLogger(__name__)
 
 # Pre-built curated list so the home page works without network
 CURATED_IDS = [
@@ -66,10 +68,10 @@ def _fetch_json(url: str, timeout: int = 10) -> Optional[dict | list]:
         with urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except URLError as e:
-        print(f"[flatpak] URLError: {e}")
+        _logger.debug("Flathub request failed: %s", e)
         return None
     except json.JSONDecodeError as e:
-        print(f"[flatpak] JSONDecodeError: {e}")
+        _logger.debug("Flathub returned invalid JSON: %s", e)
         return None
 
 
@@ -129,11 +131,11 @@ def _installed_ids() -> set[str]:
             capture_output=True, text=True, timeout=10,
         )
         if r.returncode != 0:
-            print(f"[flatpak] list --app falló ({r.returncode}): {(r.stderr or '').strip()}")
+            _logger.debug("flatpak list --app failed (%s): %s", r.returncode, (r.stderr or "").strip())
             return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
     except Exception as e:
-        print(f"[flatpak] No se pudieron consultar los IDs instalados: {e}")
+        _logger.debug("Could not query installed Flatpak IDs: %s", e)
         return set()
 
 
@@ -209,14 +211,14 @@ def _search_via_cli(query: str, limit: int = 5000) -> List[Package]:
             capture_output=True, text=True, timeout=45,
         )
     except subprocess.TimeoutExpired as e:
-        print(f"[flatpak] La búsqueda superó el límite de 45 s: {e}")
+        _logger.debug("Flatpak search exceeded the 45-second limit: %s", e)
         raise FlatpakSearchTimeout(str(e)) from e
     except Exception as e:
-        print(f"[flatpak] Error en CLI search: {e}")
+        _logger.debug("Flatpak CLI search failed: %s", e)
         return []
 
     if r.returncode != 0:
-        print(f"[flatpak] flatpak search falló ({r.returncode}): {(r.stderr or '').strip()}")
+        _logger.debug("flatpak search failed (%s): %s", r.returncode, (r.stderr or "").strip())
         return []
 
     installed = _installed_ids()
@@ -257,7 +259,7 @@ def iter_search(query: str, limit: int = 5000, should_stop=None):
             if count >= limit:
                 return
     except StreamTimeout as e:
-        print(f"[flatpak] La búsqueda superó el límite de 45 s: {e}")
+        _logger.debug("Flatpak search exceeded the 45-second limit: %s", e)
         raise FlatpakSearchTimeout(str(e)) from e
 
 
@@ -340,7 +342,7 @@ def get_details(app_id: str) -> Optional[Package]:
             category="Other",
         )
     except Exception as e:
-        print(f"[flatpak] Error obteniendo detalles de {app_id}: {e}")
+        _logger.debug("Could not get Flatpak details for %s: %s", app_id, e)
         return None
 
 
@@ -355,11 +357,11 @@ def list_installed() -> List[Package]:
             capture_output=True, text=True, timeout=10,
         )
     except Exception as e:
-        print(f"[flatpak] No se pudieron listar las aplicaciones instaladas: {e}")
+        _logger.debug("Could not list installed Flatpak applications: %s", e)
         return []
 
     if r.returncode != 0:
-        print(f"[flatpak] flatpak list falló ({r.returncode}): {(r.stderr or '').strip()}")
+        _logger.debug("flatpak list failed (%s): %s", r.returncode, (r.stderr or "").strip())
         return []
 
     packages = []
@@ -624,11 +626,11 @@ def list_remotes() -> set[str]:
         if r.returncode != 0:
             return set()
         if r.returncode != 0:
-            print(f"[flatpak] list --app falló ({r.returncode}): {(r.stderr or '').strip()}")
+            _logger.debug("flatpak list --app failed (%s): %s", r.returncode, (r.stderr or "").strip())
             return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
     except Exception as e:
-        print(f"[flatpak] No se pudieron consultar los IDs instalados: {e}")
+        _logger.debug("Could not query installed Flatpak IDs: %s", e)
         return set()
 
 

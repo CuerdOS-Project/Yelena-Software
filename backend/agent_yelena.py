@@ -96,7 +96,7 @@ def _binary(operation: str) -> str:
     try:
         name = _OPERATION_BINARIES[operation]
     except KeyError as exc:
-        raise AgentError(f"Operación XBPS no permitida: {operation!r}") from exc
+        raise AgentError(f"Operación no permitida: {operation!r}") from exc
     path = shutil.which(name)
     if not path:
         raise AgentError(f"No se encontró {name} en PATH")
@@ -104,7 +104,7 @@ def _binary(operation: str) -> str:
     # ejecutable. Se permite /usr/bin o /bin, habituales en CuerdOS.
     resolved = os.path.realpath(path)
     if resolved not in {f"/usr/bin/{name}", f"/bin/{name}"}:
-        raise AgentError(f"Binario XBPS no confiable: {resolved}")
+        raise AgentError(f"Binario del sistema no confiable: {resolved}")
     return resolved
 
 
@@ -116,7 +116,7 @@ def _validate_args(operation: str, args: Sequence[str]) -> list[str]:
             raise AgentError("Argumento inválido")
         if raw.startswith("-"):
             if raw not in allowed:
-                raise AgentError(f"Opción no permitida para XBPS: {raw}")
+                raise AgentError(f"Opción no permitida: {raw}")
         elif not _PACKAGE.fullmatch(raw):
             raise AgentError(f"Nombre de paquete no permitido: {raw!r}")
         result.append(raw)
@@ -143,7 +143,7 @@ def authorize(operation: str, *, allow_user_interaction: bool = True,
     try:
         action = _ACTION_IDS[operation]
     except KeyError as exc:
-        raise AgentError(f"Operación XBPS no permitida: {operation!r}") from exc
+        raise AgentError(f"Operación no permitida: {operation!r}") from exc
     pkcheck = shutil.which("pkcheck")
     if not pkcheck:
         if require_tool:
@@ -176,7 +176,7 @@ def build_privileged_command(binary: str, args: Sequence[str]) -> list[str]:
     for operation, name in _OPERATION_BINARIES.items():
         if real in {f"/usr/bin/{name}", f"/bin/{name}"}:
             return build_command(operation, args)
-    raise AgentError("Solo se permite elevar un binario XBPS autorizado")
+    raise AgentError("Solo se permite elevar un binario del sistema autorizado")
 
 
 def run(operation: str, args: Sequence[str], **kwargs) -> subprocess.CompletedProcess[str]:

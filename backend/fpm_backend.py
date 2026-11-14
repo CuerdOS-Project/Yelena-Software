@@ -1,7 +1,7 @@
-# Yelena Software — FPM NISSA client
+# Yelena Software — FPM PLUTO client
 #
-# FPM remains a separate sibling program. NISSA v1 provides repository search;
-# NISSA v2 adds read-only installed inventory, pending updates, and package
+# FPM remains a separate sibling program. PLUTO v1 provides repository search;
+# PLUTO v2 adds read-only installed inventory, pending updates, and package
 # details. Mutating operations still run through Yelena's existing polkit
 # authorization bridge so the UI never falls back to sudo or a shell.
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from .models import Package, PackageSource, PackageStatus
 
-_PROTOCOL = "NISSA"
+_PROTOCOL = "PLUTO"
 _V1 = 1
 _V2 = 2
 _V2_CAPABILITIES = {"search", "installed", "updates", "info"}
@@ -53,7 +53,7 @@ def fpm_path() -> Optional[str]:
 def _hello(binary: str, version: int) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
-            [binary, "nissa", f"v{version}", "hello"],
+            [binary, "pluto", f"v{version}", "hello"],
             capture_output=True,
             text=True,
             timeout=3,
@@ -78,71 +78,71 @@ def _hello(binary: str, version: int) -> dict[str, Any] | None:
 
 
 @lru_cache(maxsize=4)
-def _supports_nissa(binary: str) -> bool:
+def _supports_pluto(binary: str) -> bool:
     message = _hello(binary, _V1)
     return bool(message and "search" in message["payload"]["capabilities"])
 
 
 @lru_cache(maxsize=4)
-def _supports_nissa_v2(binary: str) -> bool:
+def _supports_pluto_v2(binary: str) -> bool:
     message = _hello(binary, _V2)
     return bool(message and _V2_CAPABILITIES.issubset(set(message["payload"]["capabilities"])))
 
 
 @lru_cache(maxsize=4)
-def _supports_nissa_mirrors(binary: str) -> bool:
+def _supports_pluto_mirrors(binary: str) -> bool:
     message = _hello(binary, _V2)
     if not message or not _V2_CAPABILITIES.issubset(set(message["payload"]["capabilities"])):
         return False
     return "mirrors" in set(message["payload"]["capabilities"])
 
 
-def supports_nissa() -> bool:
+def supports_pluto() -> bool:
     """True only when the installed FPM binary speaks the search protocol."""
     binary = fpm_path()
-    return bool(binary and _supports_nissa(binary))
+    return bool(binary and _supports_pluto(binary))
 
 
-def supports_nissa_v2() -> bool:
+def supports_pluto_v2() -> bool:
     """True when FPM exposes inventory, update, and package-detail calls."""
     binary = fpm_path()
-    return bool(binary and _supports_nissa_v2(binary))
+    return bool(binary and _supports_pluto_v2(binary))
 
 
 @lru_cache(maxsize=4)
-def _supports_nissa_am_search(binary: str) -> bool:
+def _supports_pluto_am_search(binary: str) -> bool:
     message = _hello(binary, _V2)
     if not message or not _V2_CAPABILITIES.issubset(set(message["payload"]["capabilities"])):
         return False
     return "search-am" in set(message["payload"]["capabilities"])
 
 
-def supports_nissa_am_search() -> bool:
-    """True when FPM NISSA v2 exposes the optional am-FUSION search source."""
+def supports_pluto_am_search() -> bool:
+    """True when FPM PLUTO v2 exposes the optional am-FUSION search source."""
     binary = fpm_path()
-    return bool(binary and _supports_nissa_am_search(binary))
+    return bool(binary and _supports_pluto_am_search(binary))
 
 
-def supports_nissa_mirrors() -> bool:
-    """True when FPM's optional NISSA v2 mirror-status query is available."""
+def supports_pluto_mirrors() -> bool:
+    """True when FPM's optional PLUTO v2 mirror-status query is available."""
     binary = fpm_path()
-    return bool(binary and _supports_nissa_mirrors(binary))
+    return bool(binary and _supports_pluto_mirrors(binary))
 
 
 def is_available() -> bool:
     """Compatibility alias used by source detection/settings."""
-    return supports_nissa()
+    return supports_pluto()
 
 
 def _request(version: int, method: str, *args: str, timeout: int = 30) -> list[dict[str, Any]]:
     binary = fpm_path()
-    if not binary or (version == _V1 and not _supports_nissa(binary)):
+    if not binary or (version == _V1 and not _supports_pluto(binary)):
         return []
-    if version == _V2 and not _supports_nissa_v2(binary):
+    if version == _V2 and not _supports_pluto_v2(binary):
         return []
     try:
         result = subprocess.run(
-            [binary, "nissa", f"v{version}", method, *args],
+            [binary, "pluto", f"v{version}", method, *args],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -295,7 +295,7 @@ def _package_from_search_row(payload: dict[str, Any], version: int) -> Optional[
     )
 
 
-def _parse_nissa_search(output: str, limit: int = 5000, version: int = _V1) -> list[Package]:
+def _parse_pluto_search(output: str, limit: int = 5000, version: int = _V1) -> list[Package]:
     messages: list[dict[str, Any]] = []
     for raw_line in output.splitlines():
         if not raw_line.strip():
@@ -319,7 +319,7 @@ def search(query: str, limit: int = 5000) -> list[Package]:
     """Search FPM's configured XBPS repositories and optional am-FUSION source.
 
     Repository selection and architecture are controlled by the active XBPS
-    configuration. A malformed NISSA stream falls back to native XBPS search
+    configuration. A malformed PLUTO stream falls back to native XBPS search
     instead of being misreported as an empty catalog.
     """
     query = query.strip()
@@ -329,7 +329,7 @@ def search(query: str, limit: int = 5000) -> list[Package]:
     if not binary:
         from . import xbps_backend
         return xbps_backend.search(query, limit)
-    version = _V2 if _supports_nissa_v2(binary) else _V1
+    version = _V2 if _supports_pluto_v2(binary) else _V1
     messages = _request(version, "search", query)
     packages = _packages_from_search(messages, limit, version)
     if packages is None:
@@ -353,9 +353,9 @@ def _packages_from_search(messages: list[dict[str, Any]], limit: int,
 
 
 def search_am(query: str, limit: int = 5000) -> list[Package]:
-    """Search only the AM AppImage source through NISSA v2 when enabled."""
+    """Search only the AM AppImage source through PLUTO v2 when enabled."""
     query = query.strip()
-    if not query or not supports_nissa_am_search():
+    if not query or not supports_pluto_am_search():
         return []
     messages = _request(_V2, "search", query)
     packages = _packages_from_search(messages, limit, _V2)
@@ -387,7 +387,7 @@ def _package_from_installed(payload: dict[str, Any]) -> Optional[Package]:
 
 
 def list_installed() -> list[Package]:
-    """Read the installed XBPS inventory from FPM's NISSA v2 interface."""
+    """Read the installed XBPS inventory from FPM's PLUTO v2 interface."""
     messages = _request(_V2, "installed")
     rows = _parse_result_stream(messages, "installed", _V2)
     if rows is None:
@@ -443,7 +443,7 @@ def get_updates() -> list[dict[str, Any]]:
             "arch": str(row.get("arch") or ""),
             "download_size": 0,
             "install_size": 0,
-            "repo": str(row.get("repository") or "XBPS"),
+            "repo": str(row.get("repository") or "CuerdOS"),
             "icon_name": str(row.get("name") or ""),
         }
         for row in rows if row.get("name")
@@ -486,13 +486,13 @@ def get_details(pkg_name: str) -> Optional[Package]:
 
 
 def get_mirror_status() -> Optional[dict[str, Any]]:
-    """Return active Void mirror/fallback metadata through optional NISSA v2.
+    """Return active Void mirror/fallback metadata through optional PLUTO v2.
 
     Older FPM builds remain fully usable: this optional query returns None
-    rather than downgrading the existing NISSA v2 inventory/search support.
+    rather than downgrading the existing PLUTO v2 inventory/search support.
     """
     binary = fpm_path()
-    if not binary or not _supports_nissa_mirrors(binary):
+    if not binary or not _supports_pluto_mirrors(binary):
         return None
     messages = _request(_V2, "mirrors")
     rows = _parse_result_stream(messages, "mirrors", _V2)
@@ -523,7 +523,7 @@ search_packages = search
 fpm_available = is_available
 
 __all__ = [
-    "fpm_path", "supports_nissa", "supports_nissa_v2", "supports_nissa_mirrors", "is_available",
-    "fpm_available", "search", "search_am", "supports_nissa_am_search", "search_packages", "list_installed",
+    "fpm_path", "supports_pluto", "supports_pluto_v2", "supports_pluto_mirrors", "is_available",
+    "fpm_available", "search", "search_am", "supports_pluto_am_search", "search_packages", "list_installed",
     "list_upgradable", "get_updates", "get_details", "get_mirror_status", "xbps_available",
 ]
