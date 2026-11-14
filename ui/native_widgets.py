@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect, QGraphicsDropShadowEffect,
 )
 
+from .theme import TintedLabel, blend, semantic_color
+
 
 class SlidingLoadingBar(QWidget):
     """Barra fina indeterminada: un segmento se desliza de izquierda a
@@ -945,10 +947,12 @@ class MultilineElideLabel(QLabel):
     3ª línea a medias que el recorte de altura fija terminaba "sangrando"
     sobre los widgets de abajo."""
 
-    def __init__(self, text: str = "", max_lines: int = 2, parent=None):
+    def __init__(self, text: str = "", max_lines: int = 2, parent=None,
+                 center: bool = False):
         super().__init__(parent)
         self._full_text = text
         self._max_lines = max_lines
+        self._center = center
         self.setWordWrap(False)   # el wrap real lo hace _relayout(), no Qt
         self._highlight = ""
         fm = self.fontMetrics()
@@ -986,50 +990,55 @@ class MultilineElideLabel(QLabel):
         super().resizeEvent(event)
         self.update()
 
-    def paintEvent(self, _event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(self.palette().color(self.foregroundRole()))
-        p.setFont(self.font())
-
+    def _build_entries(self, width: int):
+        """Calcula (una sola vez por texto/ancho/fuente) las líneas ya
+        maquetadas y elididas; el repintado solo las dibuja."""
         fm = self.fontMetrics()
         line_height = fm.lineSpacing()
-        width = max(1, self.width())
-
+        entries = []
         layout = QTextLayout(self._full_text, self.font())
         layout.setTextOption(QTextOption(Qt.AlignLeft))
         layout.setFormats(self._formats(self._full_text))
         layout.beginLayout()
-
         y = 0.0
         for line_no in range(self._max_lines):
             line = layout.createLine()
             if not line.isValid():
                 break
-            is_last_allowed = line_no == self._max_lines - 1
             line.setLineWidth(width)
-
-            if is_last_allowed:
-                # ¿Sobra texto tras esta línea? -> elidir con "…"
+            if line_no == self._max_lines - 1:
                 next_start = line.textStart() + line.textLength()
                 if next_start < len(self._full_text):
-                    elided = _elide_words(
-                        fm, self._full_text[line.textStart():], width
-                    )
+                    elided = _elide_words(fm, self._full_text[line.textStart():], width)
                     el = QTextLayout(elided, self.font())
                     el.setFormats(self._formats(elided))
                     el.beginLayout()
                     el_line = el.createLine()
                     el_line.setLineWidth(1e5)
                     el.endLayout()
-                    el_line.draw(p, QPointF(0, y))
-                    y += line_height
+                    entries.append((el, el_line, y))
                     break
-
-            line.draw(p, QPointF(0, y))
+            entries.append((layout, line, y))
             y += line_height
-
         layout.endLayout()
+        return entries
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.setFont(self.font())
+        width = max(1, self.width())
+        accent = self.palette().color(QPalette.Highlight).rgba()
+        key = (self._full_text, self._highlight, width, self.font().key(), accent)
+        if key != getattr(self, "_paint_key", None):
+            self._paint_entries = self._build_entries(width)
+            self._paint_key = key
+        for _layout, line, y in self._paint_entries:
+            x = 0.0
+            if self._center:
+                x = max(0.0, (width - line.naturalTextWidth()) / 2.0)
+            line.draw(p, QPointF(x, y))
         p.end()
 
     def sizeHint(self) -> QSize:
@@ -1199,8 +1208,7 @@ class NavButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(36)
         _pt(self, 11)
-        self._nav_style_cache = None
-        self._apply_nav_style()
+        self.setFlat(True)
         # Microtransición discreta: da respuesta al pasar el puntero sin
         # mover el layout ni provocar saltos en la barra superior.
         self._hover_effect = QGraphicsOpacityEffect(self)
@@ -1209,31 +1217,6 @@ class NavButton(QPushButton):
         self._hover_anim = QPropertyAnimation(self._hover_effect, b"opacity", self)
         self._hover_anim.setDuration(140)
         self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
-
-    def _apply_nav_style(self) -> None:
-        """Usa la paleta activa para que el estado seleccionado siga el tema."""
-        palette = self.palette()
-        accent = palette.color(QPalette.Highlight).name()
-        selected_text = palette.color(QPalette.HighlightedText).name()
-        style = (
-            "QPushButton { background-color: transparent; border: none; "
-            "border-radius: 8px; padding: 6px 10px; }"
-            f"QPushButton:hover {{ background-color: rgba({QColor(accent).red()}, "
-            f"{QColor(accent).green()}, {QColor(accent).blue()}, 34); }}"
-            f"QPushButton:checked {{ background-color: {accent}; color: {selected_text}; }}"
-            f"QPushButton:checked:hover {{ background-color: {accent}; color: {selected_text}; }}"
-            "QPushButton:disabled { background-color: transparent; }"
-        )
-        # setStyleSheet puede producir otro evento de paleta en Qt. Evitar
-        # reaplicar el mismo QSS desde changeEvent y entrar en recursión.
-        if style != self._nav_style_cache:
-            self._nav_style_cache = style
-            self.setStyleSheet(style)
-
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
-            self._apply_nav_style()
 
     def _animate_hover(self, opacity: float) -> None:
         self._hover_anim.stop()
@@ -1251,18 +1234,8 @@ class NavButton(QPushButton):
 
 
 class ChipNavButton(QPushButton):
-    """Flechas de navegación del carrusel.
-
-    Antes usaba los caracteres "‹"/"›" como `text()` del botón, pintados
-    por el QStyle activo con QPalette.ButtonText. Eso funcionaba con el
-    QSS propio de CSDS (que fuerza color: #ebebeb), pero en los temas
-    "auto"/"breeze"/"fusion" -- que llaman a app.setStyleSheet("") y
-    dejan el color en manos de la paleta nativa del sistema -- el glifo
-    podía salir invisible (mismo tono que el fondo del botón, o un
-    ButtonText que el tema nativo no pinta para botones "flat"). Por eso
-    ahora se dibuja a mano con QPainter, igual que el resto de iconos
-    "symbolic" de este módulo: color explícito tomado de la paleta,
-    garantizado visible bajo cualquier tema."""
+    """Flechas de navegación del carrusel: el estilo pinta el botón y el
+    glifo se dibuja con QPainter usando roles de la paleta."""
 
     def __init__(self, direction: str = "left", *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1326,21 +1299,24 @@ class CompactInstallButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(32)
         self.setMinimumWidth(92)
-        self.setStyleSheet(
-            "QPushButton { background: palette(highlight); color: palette(highlighted-text); "
-            "border: none; border-radius: 8px; padding: 0 14px; font-weight: bold; }"
-            "QPushButton:hover { border: 2px solid rgba(255,255,255,80); }"
-            "QPushButton:disabled { background: palette(mid); color: palette(window-text); }"
-        )
+        self.set_primary(text)
+
+    def set_primary(self, text: str) -> None:
+        self.setText(text)
+        self.setFlat(False)
+        self.setDefault(True)
+        font = self.font()
+        font.setBold(True)
+        self.setFont(font)
 
     def set_secondary(self, text: str) -> None:
-        """Variante discreta (contorno) para apps que ya están instaladas."""
+        """Variante discreta para apps que ya están instaladas."""
         self.setText(text)
-        self.setStyleSheet(
-            "QPushButton { background: transparent; color: palette(window-text); "
-            "border: 1px solid palette(mid); border-radius: 8px; padding: 0 14px; }"
-            "QPushButton:hover { background: rgba(128,128,128,40); }"
-        )
+        self.setDefault(False)
+        self.setFlat(True)
+        font = self.font()
+        font.setBold(False)
+        self.setFont(font)
 
 
 class RemoveButton(QPushButton):
@@ -1361,8 +1337,6 @@ class GhostRemoveButton(QPushButton):
     el cursor. Ancho fijo e icono solo: no se despliega ni reserva hueco, así
     no empuja ni separa a los widgets vecinos. El texto vive en el tooltip."""
 
-    _RED = QColor("#D9534F")
-
     def __init__(self, text: str = "", parent=None):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
@@ -1371,15 +1345,15 @@ class GhostRemoveButton(QPushButton):
         self.setIconSize(QSize(18, 18))
         self.setToolTip(text)
         self.setAccessibleName(text)
-        r = self._RED
-        self.setStyleSheet(
-            "QPushButton { background: transparent; border: none; border-radius: 8px; "
-            f"padding: 0; color: rgba({r.red()}, {r.green()}, {r.blue()}, 220); }}"
-            f"QPushButton:hover {{ background: rgba({r.red()}, {r.green()}, {r.blue()}, 38); }}"
-            f"QPushButton:pressed {{ background: rgba({r.red()}, {r.green()}, {r.blue()}, 70); }}"
-            "QPushButton:disabled { background: transparent; }"
-        )
-        self.setIcon(symbolic_icon("trash", color=r, size=18))
+        self._refresh_icon()
+
+    def _refresh_icon(self) -> None:
+        self.setIcon(symbolic_icon("trash", color=semantic_color("error", self), size=18))
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange and self.isEnabled():
+            self._refresh_icon()
 
     def set_busy(self, text: str) -> None:
         """Estado "eliminando…": deshabilitado (el texto queda en el tooltip)."""
@@ -1545,34 +1519,24 @@ _GRADIENT_DIRECTIONS = [
 ]
 
 
-class CategoryPill(QLabel):
-    """Rótulo en forma de píldora (rectángulo muy redondeado) con el
-    degradado propio de una categoría — usado en la cabecera de la
-    página de categoría para indicar en cuál estamos, centrado sobre
-    el grid."""
+class CategoryPill(TintedLabel):
+    """Rótulo en forma de píldora con el color propio de una categoría —
+    usado en la cabecera de la página de categoría."""
 
     def __init__(self, text: str, colors: tuple[str, str] = ("#6366F1", "#4347B0"), parent=None):
-        super().__init__(text, parent)
-        self.setObjectName("categoryPill")
+        super().__init__(text, parent, radius=1000.0, tint=0.18, border=0.3)
         self.setAlignment(Qt.AlignCenter)
         f = self.font()
         f.setBold(True)
-        f.setPointSize(11)
+        f.setPointSizeF(f.pointSizeF() * 1.1)
         self.setFont(f)
+        self.setContentsMargins(22, 6, 22, 6)
         self.setMinimumHeight(34)
         self.set_category(text, colors)
 
     def set_category(self, text: str, colors: tuple[str, str]) -> None:
         self.setText(text)
-        r, g, b = QColor(colors[0]).red(), QColor(colors[0]).green(), QColor(colors[0]).blue()
-        # Mismo lenguaje que los tiles: fondo translúcido + borde fino del
-        # color de la categoría, texto con el color de texto del tema.
-        self.setStyleSheet(
-            f"QLabel#categoryPill {{ background: rgba({r}, {g}, {b}, 46); "
-            f"border: 1px solid rgba({r}, {g}, {b}, 120); "
-            f"color: palette(window-text); border-radius: 17px; "
-            f"padding: 6px 22px; }}"
-        )
+        self.set_tint_color(QColor(colors[0]))
 
 
 def attach_hover_lift(widget: QWidget, max_blur: float = 26.0) -> None:
@@ -1623,7 +1587,6 @@ class CategoryTileButton(QPushButton):
     def __init__(self, icon_svg: str, label: str, colors: tuple[str, str] = ("#6366F1", "#4347B0"),
                  index: int = 0, parent=None):
         super().__init__(parent)
-        self.setObjectName("catTileBtn")
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(64)
         self.setToolTip(label)
@@ -1631,8 +1594,7 @@ class CategoryTileButton(QPushButton):
         self.setText("")  # el contenido se dibuja con labels internos
 
         c1, c2 = QColor(colors[0]), QColor(colors[1])
-        # Trazo del icono: tono claro sobre fondos oscuros, tono más
-        # profundo sobre fondos claros, para mantener el contraste.
+        self._tint = c1
         dark_theme = self.palette().color(QPalette.Window).lightness() < 128
         icon_color = c1 if dark_theme else c2
 
@@ -1641,15 +1603,10 @@ class CategoryTileButton(QPushButton):
         row.setSpacing(12)
         row.addStretch(1)
 
-        chip = QLabel()
-        chip.setObjectName("catTileChip")
+        chip = TintedLabel(radius=11.0, tint=0.24, color=c1, border=0.0)
         chip.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         chip.setFixedSize(38, 38)
         chip.setAlignment(Qt.AlignCenter)
-        chip.setStyleSheet(
-            f"QLabel#catTileChip {{ background: rgba({c1.red()}, {c1.green()}, {c1.blue()}, 60); "
-            f"border: none; border-radius: 11px; }}"
-        )
         icon = svg_icon(icon_svg.replace("#FFFFFF", icon_color.name()), 22)
         if not icon.isNull():
             chip.setPixmap(icon.pixmap(QSize(22, 22)))
@@ -1657,24 +1614,33 @@ class CategoryTileButton(QPushButton):
 
         text_lbl = QLabel(label)
         text_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        text_lbl.setStyleSheet("background: transparent; border: none; color: palette(window-text);")
         tf = text_lbl.font()
-        tf.setPointSize(11)
+        tf.setPointSizeF(tf.pointSizeF() * 1.1)
         tf.setBold(True)
         text_lbl.setFont(tf)
         row.addWidget(text_lbl, alignment=Qt.AlignVCenter)
         row.addStretch(1)
 
-        self.setStyleSheet(self._style_for(colors, index))
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.update()
 
-    def _style_for(self, colors: tuple[str, str], index: int) -> str:
-        c = QColor(colors[0])
-        r, g, b = c.red(), c.green(), c.blue()
-        return (
-            f"QPushButton#catTileBtn {{ background: rgba({r}, {g}, {b}, 30); "
-            f"border: 1px solid rgba({r}, {g}, {b}, 80); border-radius: 14px; "
-            f"color: palette(window-text); }}"
-            f"QPushButton#catTileBtn:hover {{ background: rgba({r}, {g}, {b}, 56); "
-            f"border: 1px solid rgba({r}, {g}, {b}, 150); }}"
-            f"QPushButton#catTileBtn:pressed {{ background: rgba({r}, {g}, {b}, 80); }}"
-        )
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        palette = self.palette()
+        window = palette.color(QPalette.Window)
+        if self.isDown():
+            amount = 0.32
+        elif self.underMouse():
+            amount = 0.22
+        else:
+            amount = 0.12
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(blend(window, self._tint, amount))
+        painter.setPen(QPen(blend(window, self._tint, amount + 0.2), 1))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
+        painter.end()

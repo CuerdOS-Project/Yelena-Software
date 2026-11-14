@@ -23,7 +23,8 @@ from backend.task_manager import TaskManager
 from backend.models import Package, PackageSource, TaskType
 
 from .home_page import HomePage
-from .native_widgets import NavButton, StatusDot, CountBadge, STATUS_COLORS
+from .native_widgets import NavButton, StatusDot, CountBadge, STATUS_COLORS, symbolic_icon
+from .theme import semantic_color
 
 from core.i18n import tr
 import core.settings as app_settings
@@ -463,9 +464,8 @@ class MainWindow(QMainWindow):
         tabs_lay.addWidget(search_btn)
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Plain)
-        sep.setFixedSize(1, 18)
-        sep.setStyleSheet("background: palette(mid); border: none;")
+        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFixedSize(2, 18)
         tabs_lay.addSpacing(3)
         tabs_lay.addWidget(sep, alignment=Qt.AlignVCenter)
         tabs_lay.addSpacing(3)
@@ -859,13 +859,7 @@ class MainWindow(QMainWindow):
             btn_row.setContentsMargins(16, 8, 16, 12)
             btn_row.addStretch(1)
             close_apply_btn = QPushButton(tr("settings_close_apply"))
-            close_apply_btn.setObjectName("btnSettingsCloseApply")
-            close_apply_btn.setCursor(Qt.PointingHandCursor)
-            close_apply_btn.setStyleSheet(
-                "QPushButton#btnSettingsCloseApply { background: #8AAB4A; color: #14150F; "
-                "border-radius: 8px; border: none; padding: 8px 20px; font-weight: 600; }"
-                "QPushButton#btnSettingsCloseApply:hover { background: #9FC15F; }"
-            )
+            close_apply_btn.setDefault(True)
             close_apply_btn.clicked.connect(dlg.close)
             btn_row.addWidget(close_apply_btn)
             lay.addLayout(btn_row)
@@ -957,16 +951,13 @@ class MainWindow(QMainWindow):
         btn = getattr(self, "_tasks_btn", None)
         if btn is None:
             return
-        color = {"install": "#35D879", "remove": "#FF5A5F"}.get(
-            self._task_activity_color
-        )
-        if color and self._task_activity_on:
-            btn.setStyleSheet(
-                f"QPushButton {{ background: {color}; color: #102018; border-radius: 8px; }}"
-                f"QPushButton:hover {{ background: {color}; }}"
-            )
+        if not hasattr(self, "_tasks_base_icon"):
+            self._tasks_base_icon = btn.icon()
+        kind = {"install": "success", "remove": "error"}.get(self._task_activity_color)
+        if kind and self._task_activity_on:
+            btn.setIcon(symbolic_icon("terminal", color=semantic_color(kind, btn), size=16))
         else:
-            btn.setStyleSheet("")
+            btn.setIcon(self._tasks_base_icon)
 
     def _has_active_tasks(self) -> bool:
         try:
@@ -1118,17 +1109,31 @@ class MainWindow(QMainWindow):
         """El comportamiento depende de la página activa:
         - Instaladas: filtra en vivo la lista instalada.
         - Actualizaciones: filtra en vivo la lista de actualizaciones.
-        - Explorar: no busca en cada tecla (Enter dispara la búsqueda de
-          repos, ver _on_search_enter); solo vuelve a Explorar si el
-          cuadro queda vacío estando ya en la página de resultados.
+        - Explorar: muestra resultados y sugerencias mientras se escribe.
         """
         current = self._stack.currentIndex()
         if current == PAGE_INSTALLED and self._pages[PAGE_INSTALLED] is not None:
             self._pages[PAGE_INSTALLED]._on_search_changed(text)
             return
-        if not text.strip() and current == PAGE_SEARCH:
+
+        if text.strip():
+            page = self._search_page
+            page.trigger_search(text)
+            if current != PAGE_SEARCH:
+                self._prev_page = current
+                self._stack.setCurrentIndex(PAGE_SEARCH)
+                self._sync_nav_selection(None)
+            self._sync_search_filters()
+            QTimer.singleShot(0, self._sync_search_filters)
+            return
+
+        if current == PAGE_SEARCH:
+            page = self._pages[PAGE_SEARCH]
+            if page is not None:
+                page.trigger_search("")
             self._stack.setCurrentIndex(PAGE_EXPLORE)
             self._sync_nav_selection(PAGE_EXPLORE)
+            self._sync_search_filters()
 
     @Slot()
     def _on_search_enter(self):
@@ -1185,6 +1190,7 @@ class MainWindow(QMainWindow):
         if self._auto_sync_running:
             return
         self._auto_sync_running = True
+        self._notify_updates_sync(True)
 
         import threading
 
@@ -1203,7 +1209,16 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=_thread, daemon=True).start()
 
+    def _notify_updates_sync(self, active: bool) -> None:
+        page = self._pages[PAGE_UPDATES]
+        if page is not None:
+            try:
+                page.set_external_sync(active)
+            except Exception:
+                pass
+
     def _on_auto_sync_done(self):
+        self._notify_updates_sync(False)
         # Vuelve al hilo de GUI: refresca el punto de estado y, si la
         # página de Actualizaciones ya está construida, su lista también.
         self._refresh_status_dot()
@@ -1269,6 +1284,9 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_sources_changed(self):
         """Refresh cached AM search results after a repository install/sync."""
+        home = self._pages[PAGE_EXPLORE] if len(self._pages) > PAGE_EXPLORE else None
+        if home is not None and hasattr(home, "refresh_package_filters"):
+            home.refresh_package_filters()
         try:
             from core import search_cache
             search_cache.invalidate("appimage:am-FUSION")

@@ -135,16 +135,11 @@ def main():
 
     # Debe coincidir con el nombre del .desktop para que el compositor
     QCoreApplication.setApplicationName("yl-soft")
-    QCoreApplication.setApplicationVersion("1.1")
+    QCoreApplication.setApplicationVersion("1.2")
     QCoreApplication.setOrganizationName("CuerdOS")
 
     app = QApplication(sys.argv)
     app.setApplicationDisplayName(tr("app_name"))
-
-    # Tema visual (CSDS / Yelena-sistema / Breeze / Fusion / nativo).
-    # Ver resources/styles/theme.py para el detalle de cada uno.
-    from resources.styles import theme as app_theme
-    app_theme.apply_theme(app)
 
     # Tema de iconos: en KDE/GNOME con XDG_CURRENT_DESKTOP bien configurado
     from PySide6.QtGui import QGuiApplication, QIcon

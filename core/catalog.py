@@ -210,10 +210,10 @@ def _make_package(d: dict, lang: str = "es") -> Package:
 # Aplicaciones conocidas que deben tener prioridad en la portada. El resto
 # del catálogo sigue disponible debajo, ordenado por valoración y nombre.
 HOME_KNOWN_APP_ORDER = (
+    "xbps:vivaldi",
     "xbps:firefox",
     "xbps:vlc",
     "xbps:libreoffice",
-    "xbps:vivaldi",
     "xbps:gimp",
     "xbps:obs",
     "xbps:chromium",

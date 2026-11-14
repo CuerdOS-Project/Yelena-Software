@@ -9,9 +9,8 @@ from PySide6.QtCore import (
     Qt, QSize, QCoreApplication, qVersion, Signal,
     QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
 )
-from PySide6.QtCore import QRectF
 from PySide6.QtGui import (
-    QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap,
+    QGuiApplication, QIcon, QPixmap,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
@@ -89,45 +88,6 @@ class _InfoCard(CardFrame):
         lay.addLayout(text_col, 1)
 
 
-class _SpeechBubble(QWidget):
-    """Globo de diálogo con cola hacia abajo, coloreado según la paleta."""
-
-    _TAIL = 12
-
-    def __init__(self, text: str, parent=None):
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 10, 16, 10 + self._TAIL)
-        lbl = QLabel(text)
-        lbl.setWordWrap(True)
-        lbl.setAlignment(Qt.AlignCenter)
-        _set_font(lbl, 11, bold=True)
-        lay.addWidget(lbl)
-
-    def paintEvent(self, _e):
-        pal = self.palette()
-        base, txt = pal.color(QPalette.Base), pal.color(QPalette.WindowText)
-        edge = QColor(txt)
-        edge.setAlpha(110)
-        w, h = self.width(), self.height()
-        body = QRectF(0.5, 0.5, w - 1, h - self._TAIL - 1)
-        path = QPainterPath()
-        path.addRoundedRect(body, 14, 14)
-        tail = QPainterPath()
-        cx, by = w / 2, body.bottom()
-        tail.moveTo(cx - 10, by)
-        tail.lineTo(cx, by + self._TAIL)
-        tail.lineTo(cx + 10, by)
-        tail.closeSubpath()
-        path = path.united(tail)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(edge, 1))
-        p.setBrush(base)
-        p.drawPath(path)
-        p.end()
-
-
 class _YelenaGreeting(QWidget):
     """Ilustración secreta de Yelena, revelada desde el easter egg de About."""
 
@@ -138,9 +98,8 @@ class _YelenaGreeting(QWidget):
         self.setFixedWidth(230)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(2)
+        lay.setSpacing(0)
 
-        lay.addWidget(_SpeechBubble(tr("about_yelena_greeting")))
         self._image = QLabel()
         self._image.setFixedSize(230, self._ART_HEIGHT)
         self._image.setAlignment(Qt.AlignCenter)
@@ -271,7 +230,7 @@ class AboutPage(QWidget):
         grid.addWidget(_InfoCard(
             ["applications-internet", "web-browser", "accessories-text-editor"],
             tr("about_source_label"),
-            f'<a href="https://cuerdos.github.io">{tr("about_source")}</a>',
+            f'<a href="https://cuerdos.es">{tr("about_source")}</a>',
         ), 1, 1)
 
         grid_wrap = QWidget()

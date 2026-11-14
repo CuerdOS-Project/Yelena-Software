@@ -59,6 +59,12 @@ def refresh_pending_updates_local() -> Tuple[bool, List[dict], str]:
     pkg_mgr = detect_pkg_mgr()
     updates: List[dict] = []
 
+    from .update_activity import is_external_xbps_active
+    if is_external_xbps_active():
+        from .updates_db import updates_db
+        cached, _ = updates_db.load_pending()
+        return True, cached, ""
+
     try:
         if pkg_mgr == "xbps":
             updates.extend(_selected_xbps_backend().get_updates())

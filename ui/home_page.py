@@ -375,10 +375,9 @@ class FeaturedBanner(FeaturedBannerFrame):
         head_wrap.setLayout(head_row)
         layout.addWidget(head_wrap, alignment=Qt.AlignHCenter)
 
-        desc = QLabel(pkg.summary)
+        # Descripción: máximo 2 líneas, centrada; lo que sobre se elide con "…".
+        desc = MultilineElideLabel(pkg.summary, max_lines=2, center=True)
         desc.setObjectName("featuredDesc")
-        desc.setWordWrap(True)
-        desc.setAlignment(Qt.AlignCenter)
         layout.addWidget(desc)
 
         self._load_backdrop()
@@ -844,6 +843,7 @@ class HomePage(QWidget):
 
     def _render_top_apps(self, apps: List[Package]):
         """Rota aplicaciones conocidas marcadas top_app en el catálogo."""
+        apps = [pkg for pkg in apps if self._package_visible(pkg)]
         top_pkgs = rank_home_apps(
             [package for package in apps if getattr(package, "top_app", False)],
             limit=8,
@@ -877,7 +877,8 @@ class HomePage(QWidget):
         self._current_category = category
         colors = CATEGORY_META.get(category, ("#6366F1", "#4347B0"))
         self._cat_pill.set_category(tr_category(category), colors)
-        pkgs = [p for p in self._all_packages if _pkg_group(p) == category]
+        pkgs = [p for p in self._all_packages
+                if _pkg_group(p) == category and self._package_visible(p)]
         self._render_category_grid(pkgs)
         self._stack.setCurrentIndex(self._PAGE_CATEGORY)
         animate_grid_reflow(self._cat_pill)
@@ -891,7 +892,30 @@ class HomePage(QWidget):
         """Las apps más populares para "Explorar apps" (antes mostraba la
         biblioteca completa filtrable por categoría; ahora eso vive en las
         páginas de categoría, y aquí solo entran las top N)."""
-        return rank_home_apps(self._all_packages, limit=_POPULAR_APPS_LIMIT)
+        return rank_home_apps(
+            [pkg for pkg in self._all_packages if self._package_visible(pkg)],
+            limit=_POPULAR_APPS_LIMIT,
+        )
+
+    @staticmethod
+    def _package_visible(pkg: Package) -> bool:
+        """Respeta el filtro persistente de paquetes multilib/32 bits."""
+        try:
+            import core.settings as app_settings
+            return not app_settings.get_bool("omit_multilib") or not pkg.is_32bit
+        except Exception:
+            return True
+
+    def refresh_package_filters(self) -> None:
+        """Reaplica preferencias de paquetería sin volver a consultar fuentes."""
+        if not self._all_packages:
+            return
+        self._render_top_apps(self._all_packages)
+        self._render_grid(self._popular())
+        if self._stack.currentIndex() == self._PAGE_CATEGORY:
+            pkgs = [p for p in self._all_packages
+                    if _pkg_group(p) == self._current_category and self._package_visible(p)]
+            self._render_category_grid(pkgs)
 
     def _compute_cols(self) -> int:
         w = self._content_width()
@@ -928,7 +952,7 @@ class HomePage(QWidget):
                 animate_grid_reflow(self._grid_container)
                 if self._stack.currentIndex() == self._PAGE_CATEGORY:
                     pkgs = [p for p in self._all_packages
-                            if _pkg_group(p) == self._current_category]
+                            if _pkg_group(p) == self._current_category and self._package_visible(p)]
                     self._render_category_grid(pkgs)
                     animate_grid_reflow(self._cat_grid_container)
 

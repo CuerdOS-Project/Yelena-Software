@@ -56,7 +56,7 @@ _PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
 ]
 
 _FRIENDLY_ES: dict[str, str] = {
-    ERR_LOCKED:     "La base de datos de XBPS está bloqueada por otro proceso "
+    ERR_LOCKED:     "Los paquetes del sistema están en uso por otro proceso "
                      "(otro gestor de paquetes u otra instancia de yl-soft). "
                      "Ciérralo e inténtalo de nuevo.",
     ERR_NETWORK:    "No se pudo contactar con los repositorios. Comprueba tu "
@@ -78,7 +78,7 @@ _FRIENDLY_ES: dict[str, str] = {
                      "Vuelve a comprobar las actualizaciones para refrescar "
                      "la lista.",
     ERR_CANCELLED:  "Operación cancelada.",
-    ERR_UNKNOWN:    "Ocurrió un error inesperado al ejecutar XBPS.",
+    ERR_UNKNOWN:    "Ocurrió un error inesperado al procesar los paquetes del sistema.",
 }
 
 
@@ -138,7 +138,7 @@ def check_xbps_health() -> Optional[XbpsError]:
             return XbpsError(
                 code=ERR_NOT_FOUND,
                 message=(f"No se encontró «{binary}» en el sistema. "
-                         "¿Está XBPS instalado correctamente?"),
+                         "¿Está CuerdOS instalado correctamente?"),
                 retryable=False,
             )
 

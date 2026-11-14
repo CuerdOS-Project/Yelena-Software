@@ -10,10 +10,10 @@ import threading
 import time
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QSize, QPointF, QRectF, Slot, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, QSize, QPointF, QRectF, QEvent, Slot, Signal, QObject
 from PySide6.QtGui import (
     QFont, QColor, QIcon, QPixmap, QPainter, QBrush, QPen,
-    QLinearGradient, QPainterPath,
+    QLinearGradient, QPainterPath, QPalette,
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -41,6 +41,7 @@ from backend.update_groups import (
 )
 from backend import xbps_error_handler as _xbps_err
 from .native_widgets import AlertBanner, symbolic_icon, themed_icon
+from .theme import Surface, blend, mono_font, scaled_font, semantic_color, set_text_color
 from .chibi_widget import ChibiImage
 
 # Backend imports
@@ -155,12 +156,6 @@ class UpdateRow(QFrame):
         self.is_crit = is_crit
         self.setObjectName("updateCard")
         self.setCursor(Qt.PointingHandCursor if not locked else Qt.ArrowCursor)
-        # Sin huecos entre filas (ver _rows_layout.setSpacing(0)): se añade
-        # una línea divisoria fina en vez de separación, para que la lista
-        # se lea como un bloque único y continuo en vez de tarjetas sueltas.
-        self.setStyleSheet(
-            "QFrame#updateCard { border: none; border-bottom: 1px solid #3F3F46; }"
-        )
 
         root = QHBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 8)
@@ -189,9 +184,9 @@ class UpdateRow(QFrame):
             f = name_lbl.font()
             f.setBold(True)
             name_lbl.setFont(f)
-            name_lbl.setStyleSheet("color: #EF9A9A;")
+            set_text_color(name_lbl, semantic_color("error", name_lbl))
         elif locked:
-            name_lbl.setStyleSheet("color: #888888;")
+            name_lbl.setForegroundRole(QPalette.PlaceholderText)
         root.addWidget(name_lbl, stretch=1)
 
         # Versiones apiladas: actual arriba, nueva abajo (una sola
@@ -207,9 +202,10 @@ class UpdateRow(QFrame):
         cur_lbl = QLabel(cur)
         cur_lbl.setObjectName("sectionSub")
         new_lbl = QLabel(new_ver)
-        new_lbl.setStyleSheet(
-            "color: #888888;" if locked else "color: #A5D6A7;"
-        )
+        if locked:
+            new_lbl.setForegroundRole(QPalette.PlaceholderText)
+        else:
+            set_text_color(new_lbl, semantic_color("success", new_lbl))
         ver_box.addWidget(cur_lbl)
         ver_box.addWidget(new_lbl)
         ver_wrap = QWidget()
@@ -242,7 +238,7 @@ class UpdateRow(QFrame):
         arch_lbl.setFixedWidth(64)
         arch_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         if locked:
-            arch_lbl.setStyleSheet("color: #888888;")
+            arch_lbl.setForegroundRole(QPalette.PlaceholderText)
         root.addWidget(arch_lbl)
 
         tip = tr("updates_col_tooltip_type").format(type=type_label)
@@ -252,6 +248,14 @@ class UpdateRow(QFrame):
 
     def is_checked(self) -> bool:
         return True
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(QPalette.Mid))
+        y = self.height() - 1
+        painter.drawLine(0, y, self.width(), y)
+        painter.end()
 
     def mousePressEvent(self, event):  # noqa: N802 (Qt override)
         super().mousePressEvent(event)
@@ -439,22 +443,34 @@ class _UpToDatePage(QWidget):
 # escala de pantalla y no depende de ningún asset externo, igual que el
 # resto de iconos dibujados a mano de esta página.
 class _SearchingSvgSpinner(QWidget):
-    _SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="40" fill="none" stroke="#3F3F46" stroke-width="9"/>
+    _SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="40" fill="none" stroke="{track}" stroke-width="9"/>
       <path d="M 50 10 A 40 40 0 0 1 88 60" fill="none"
-            stroke="#8B5CF6" stroke-width="9" stroke-linecap="round"/>
+            stroke="{arc}" stroke-width="9" stroke-linecap="round"/>
     </svg>"""
 
     def __init__(self, size: int = 96, parent=None):
         super().__init__(parent)
         self._size = size
         self.setFixedSize(size, size)
-        self._renderer = QSvgRenderer(bytearray(self._SVG), self)
+        self._renderer = QSvgRenderer(self)
+        self._load_svg()
         self._angle = 0
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)  # ~60 fps
         self._timer.timeout.connect(self._tick)
+
+    def _load_svg(self) -> None:
+        palette = self.palette()
+        svg = self._SVG.format(track=palette.color(QPalette.Mid).name(),
+                               arc=palette.color(QPalette.Highlight).name())
+        self._renderer.load(svg.encode("utf-8"))
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.PaletteChange:
+            self._load_svg()
+        super().changeEvent(event)
 
     def _tick(self):
         self._angle = (self._angle + 6) % 360
@@ -496,6 +512,7 @@ class _SearchingPage(QWidget):
         lay.addWidget(_SearchingSvgSpinner(), alignment=Qt.AlignHCenter)
         lay.addSpacing(16)
 
+        self._process_mode = False
         self._title = QLabel(tr("updates_searching"))
         title_font = self._title.font()
         title_font.setPointSize(title_font.pointSize() + 5)
@@ -509,12 +526,25 @@ class _SearchingPage(QWidget):
         self._subtitle.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._subtitle)
 
+    def set_process_mode(self, process: bool) -> None:
+        """True: hay un proceso en curso ajeno a la búsqueda (applet,
+        sincronización automática...). Cambia solo los textos."""
+        self._process_mode = bool(process)
+        self._retranslate()
+
+    def _retranslate(self) -> None:
+        if self._process_mode:
+            self._title.setText(tr("updates_process_running"))
+            self._subtitle.setText(tr("updates_process_running_subtitle"))
+        else:
+            self._title.setText(tr("updates_searching"))
+            self._subtitle.setText(tr("updates_searching_subtitle"))
+
     def showEvent(self, event):
         super().showEvent(event)
         # Se retraducen por si el idioma cambió mientras la página no
         # estaba visible.
-        self._title.setText(tr("updates_searching"))
-        self._subtitle.setText(tr("updates_searching_subtitle"))
+        self._retranslate()
 
 
 # Tarjeta "superpaquete": cuando hay más de _SYSTEM_INLINE_LIMIT
@@ -525,16 +555,11 @@ class _SearchingPage(QWidget):
 _SYSTEM_INLINE_LIMIT = 15
 
 
-class _SuperpackageCard(QFrame):
+class _SuperpackageCard(Surface):
     view_details = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("superpackageCard")
-        self.setStyleSheet(
-            "QFrame#superpackageCard { background: rgba(97, 189, 149, 0.12); "
-            "border: 1px solid rgba(97, 189, 149, 0.45); border-radius: 10px; }"
-        )
+        super().__init__(parent, radius=10.0, tint=0.12, border=0.33, role=QPalette.Highlight)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(12)
@@ -620,6 +645,8 @@ class UpdatesPage(QWidget):
         self._last_sig = None
         self._reload_pending = False
         self._update_activity_pid: Optional[int] = None
+        self._external_sync = False   # sincronización automática de MainWindow
+        self._was_active = False
 
         self._signals = _Signals()
         self._signals.append_output.connect(self._on_append_output)
@@ -661,6 +688,7 @@ class UpdatesPage(QWidget):
         QTimer.singleShot(0, self._load_cached)
         self._cache_timer = QTimer(self)
         self._cache_timer.setInterval(2000)
+        self._cache_timer.timeout.connect(self._on_activity_tick)
         self._cache_timer.timeout.connect(self._reload_from_cache)
         self._cache_timer.start()
 
@@ -706,16 +734,11 @@ class UpdatesPage(QWidget):
         # Además cada botón conserva su color de fondo propio para
         # distinguirse claramente a simple vista.
         self._btn_reload_list = QPushButton()
-        self._btn_reload_list.setObjectName("btnReloadList")
         self._btn_reload_list.setIcon(themed_icon(
             ["view-refresh-symbolic", "view-refresh"], "reload",
-            standard_pixmap=QStyle.SP_BrowserReload, color=QColor("#FFFFFF")))
+            standard_pixmap=QStyle.SP_BrowserReload,
+            color=self._btn_reload_list.palette().color(QPalette.ButtonText)))
         self._btn_reload_list.setToolTip(tr("applet_check_now"))
-        self._btn_reload_list.setStyleSheet(
-            "QPushButton#btnReloadList { background: #8B5CF6; border-radius: 8px; border: none; }"
-            "QPushButton#btnReloadList:hover { background: #A17BF6; }"
-            "QPushButton#btnReloadList:disabled { background: #3F3F46; }"
-        )
         # La comprobación sincroniza los repos y muestra _searching_page mientras carga.
         self._btn_reload_list.clicked.connect(self._refresh_updates)
 
@@ -728,35 +751,21 @@ class UpdatesPage(QWidget):
         # acción vive abajo como "Descargar mejoras" (self._btn_install_all_bottom).
 
         self._btn_cancel = QPushButton()
-        self._btn_cancel.setObjectName("btnRemove")
-        # Se usa siempre el glifo "X" dibujado a mano en blanco (symbolic_icon),
-        # NO themed_icon: los iconos del tema del sistema (process-stop-symbolic)
-        # traen su propio color fijo y no respetan el `color` que se les pasa,
-        # así que en temas donde ese icono viene oscuro/rojizo desaparecía por
-        # completo contra el fondo rojo del botón. El glifo a mano garantiza
-        # buen contraste siempre, sin depender de qué temas tenga el sistema.
-        self._btn_cancel.setIcon(symbolic_icon("cancel", color=QColor("#FFFFFF")))
+        # Glifo "X" dibujado (symbolic_icon) con el color del texto de botón:
+        # los iconos del tema del sistema no respetan el color pedido.
+        self._btn_cancel.setIcon(symbolic_icon(
+            "cancel", color=self._btn_cancel.palette().color(QPalette.ButtonText)))
         self._btn_cancel.setToolTip(tr("cancel"))
-        self._btn_cancel.setStyleSheet(
-            "QPushButton#btnRemove { background: #D9534F; border-radius: 8px; border: none; }"
-            "QPushButton#btnRemove:hover { background: #E56A66; }"
-            "QPushButton#btnRemove:disabled { background: #3F3F46; }"
-        )
         self._btn_cancel.setEnabled(False)
         self._btn_cancel.setVisible(False)
         self._btn_cancel.clicked.connect(self._cancel_process)
 
         self._btn_clean = QPushButton()
-        self._btn_clean.setObjectName("btnClean")
         self._btn_clean.setIcon(themed_icon(
             ["edit-clear-all-symbolic", "user-trash-symbolic", "edit-clear"], "broom",
-            standard_pixmap=QStyle.SP_TrashIcon, color=QColor("#FFFFFF")))
+            standard_pixmap=QStyle.SP_TrashIcon,
+            color=self._btn_clean.palette().color(QPalette.ButtonText)))
         self._btn_clean.setToolTip(tr("btn_clean_cache"))
-        self._btn_clean.setStyleSheet(
-            "QPushButton#btnClean { background: #EC4899; border-radius: 8px; border: none; }"
-            "QPushButton#btnClean:hover { background: #F172AC; }"
-            "QPushButton#btnClean:disabled { background: #3F3F46; }"
-        )
         self._btn_clean.clicked.connect(self._clean_cache)
 
         # Reload y Limpiar caché ya no van en la botonera de arriba: se
@@ -867,15 +876,11 @@ class UpdatesPage(QWidget):
         self._btn_clean.setFixedSize(38, 38)
         bottom_bar.addWidget(self._btn_clean)
         self._btn_install_all_bottom = QPushButton(tr("updates_download_improvements"))
-        self._btn_install_all_bottom.setObjectName("btnInstallBottom")
         self._btn_install_all_bottom.setCursor(Qt.PointingHandCursor)
         self._btn_install_all_bottom.setMinimumHeight(38)
-        self._btn_install_all_bottom.setStyleSheet(
-            "QPushButton#btnInstallBottom { background: #F97316; color: #FFFFFF; "
-            "border-radius: 8px; border: none; padding: 6px 22px; font-weight: 600; }"
-            "QPushButton#btnInstallBottom:hover { background: #FB923C; }"
-            "QPushButton#btnInstallBottom:disabled { background: #3F3F46; color: #888888; }"
-        )
+        self._btn_install_all_bottom.setDefault(True)
+        self._btn_install_all_bottom.setFont(
+            scaled_font(self._btn_install_all_bottom.font(), bold=True))
         self._btn_install_all_bottom.setEnabled(False)
         self._btn_install_all_bottom.clicked.connect(self._install_all)
         bottom_bar.addWidget(self._btn_install_all_bottom)
@@ -899,7 +904,7 @@ class UpdatesPage(QWidget):
 
         tb_layout.addStretch()
 
-        self._term_status_dot = _StatusDot(QColor("#555555"))
+        self._term_status_dot = _StatusDot(self.palette().color(QPalette.Mid))
         self._term_status_dot.setObjectName("terminalStatusDot")
         self._term_status_label = QLabel(tr("updates_terminal_idle"))
         self._term_status_label.setObjectName("terminalStatusLabel")
@@ -909,16 +914,13 @@ class UpdatesPage(QWidget):
 
         # Cierra la ventana de salida sin detener la operación en curso.
         self._btn_close_output = QPushButton()
-        self._btn_close_output.setObjectName("btnCloseOutput")
-        self._btn_close_output.setIcon(symbolic_icon("cancel", color=QColor("#FFFFFF")))
+        self._btn_close_output.setFlat(True)
+        self._btn_close_output.setIcon(symbolic_icon(
+            "cancel", color=self._btn_close_output.palette().color(QPalette.ButtonText)))
         self._btn_close_output.setToolTip(tr("close"))
         self._btn_close_output.setFixedSize(26, 26)
         self._btn_close_output.setIconSize(QSize(13, 13))
         self._btn_close_output.setCursor(Qt.PointingHandCursor)
-        self._btn_close_output.setStyleSheet(
-            "QPushButton#btnCloseOutput { background: transparent; border: none; border-radius: 13px; }"
-            "QPushButton#btnCloseOutput:hover { background: #3F3F46; }"
-        )
         self._btn_close_output.clicked.connect(self._close_output_window)
         tb_layout.addSpacing(10)
         tb_layout.addWidget(self._btn_close_output)
@@ -927,7 +929,7 @@ class UpdatesPage(QWidget):
 
         self._output = QTextEdit()
         self._output.setReadOnly(True)
-        self._output.setFont(QFont("Consolas, 'DejaVu Sans Mono', monospace", 10))
+        self._output.setFont(mono_font(self._output.font()))
         self._output.setObjectName("processOutput")
         self._output.setFrameShape(QFrame.NoFrame)
         self._output.setPlaceholderText(tr("updates_output_placeholder"))
@@ -953,7 +955,7 @@ class UpdatesPage(QWidget):
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(10)
 
-        self._status_dot = _StatusDot(QColor("#555555"))
+        self._status_dot = _StatusDot(self.palette().color(QPalette.Mid))
         lay.addWidget(self._status_dot)
 
         self._status_text_lbl = QLabel(tr("updates_terminal_idle"))
@@ -975,16 +977,12 @@ class UpdatesPage(QWidget):
         lay.addWidget(self._btn_view_output)
 
         self._btn_cancel = QPushButton()
-        self._btn_cancel.setObjectName("btnRemove")
-        self._btn_cancel.setIcon(symbolic_icon("cancel", color=QColor("#FFFFFF")))
+        self._btn_cancel.setIcon(symbolic_icon(
+            "cancel", color=self._btn_cancel.palette().color(QPalette.ButtonText)))
         self._btn_cancel.setToolTip(tr("cancel"))
         self._btn_cancel.setFixedSize(32, 32)
         self._btn_cancel.setIconSize(QSize(16, 16))
         self._btn_cancel.setCursor(Qt.PointingHandCursor)
-        self._btn_cancel.setStyleSheet(
-            "QPushButton#btnRemove { background: #D9534F; border-radius: 8px; border: none; }"
-            "QPushButton#btnRemove:hover { background: #E56A66; }"
-        )
         self._btn_cancel.clicked.connect(self._cancel_process)
         lay.addWidget(self._btn_cancel)
 
@@ -1025,11 +1023,51 @@ class UpdatesPage(QWidget):
 
     # Status banner (alerta de 4 colores dentro de la sección)
 
+    def set_external_sync(self, active: bool) -> None:
+        """MainWindow avisa cuando corre su sincronización automática."""
+        self._external_sync = bool(active)
+        self._on_activity_tick()
+
+    def _process_active(self) -> bool:
+        """True mientras algo está buscando/actualizando (esta página, el
+        applet u otra sincronización). En ese tiempo "no hay resultados"
+        NO significa "sistema al día": todavía no se sabe."""
+        if self._busy or self._external_sync:
+            return True
+        try:
+            return bool(is_system_update_active())
+        except Exception:
+            return False
+
+    def _on_activity_tick(self) -> None:
+        active = self._process_active()
+        if active == self._was_active:
+            return
+        self._was_active = active
+        if active:
+            if not self._available and not self._busy:
+                self._searching_page.set_process_mode(True)
+                self._page_stack.setCurrentWidget(self._searching_page)
+        else:
+            # Terminó: fuerza releer la caché para salir de la pantalla de
+            # proceso con el resultado real.
+            self._searching_page.set_process_mode(False)
+            self._last_sig = None
+            self._last_count = -1
+            QTimer.singleShot(0, self._reload_from_cache)
+        self._update_buttons()
+        self.refresh_status_banner()
+
     def refresh_status_banner(self):
         if not app_settings.get_bool("show_update_status"):
             self._alert_banner.setVisible(False)
             return
         self._alert_banner.setVisible(True)
+        if self._process_active():
+            self._alert_banner.set_alert(
+                "gray", tr("updates_process_running"),
+                tr("updates_process_running_subtitle"))
+            return
         try:
             status = update_status.compute()
         except Exception:
@@ -1242,6 +1280,14 @@ class UpdatesPage(QWidget):
         if not updates:
             self._superpackage_card.setVisible(False)
             self._update_filtered_banner([])
+            if self._process_active():
+                # Hay un proceso en curso: lista vacía = aún sin resultado,
+                # no "sistema al día".
+                self._searching_page.set_process_mode(not self._busy)
+                self._page_stack.setCurrentWidget(self._searching_page)
+                self._filter_table(self._filter_text)
+                self._update_buttons()
+                return
             self._show_up_to_date()
             self._filter_table(self._filter_text)
             self._update_buttons()
@@ -1332,7 +1378,9 @@ class UpdatesPage(QWidget):
         count = len(self._available)
         self._btn_install_all_bottom.setEnabled(count > 0)
         if count == 0:
-            self._count_badge.setText(tr("updates_up_to_date"))
+            self._count_badge.setText(
+                tr("updates_process_running") if self._process_active()
+                else tr("updates_up_to_date"))
         else:
             self._count_badge.setText(tr("updates_count_available").format(n=count))
         self.count_changed.emit(count)
@@ -1346,18 +1394,17 @@ class UpdatesPage(QWidget):
     def _on_append_output(self, text: str):
         from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor as _QColor
         line = text if text else ""
+        fmt = QTextCharFormat()
         if line.startswith("$ "):
-            color = "#6EE798"
+            fmt.setForeground(semantic_color("success", self._output))
             bold = True
         elif line.startswith("!! ") or "error" in line.lower() or "failed" in line.lower():
-            color = "#F28B82"
+            fmt.setForeground(semantic_color("error", self._output))
             bold = False
         else:
-            color = "#CFCFCF"
+            fmt.setForeground(self._output.palette().color(QPalette.Text))
             bold = False
 
-        fmt = QTextCharFormat()
-        fmt.setForeground(_QColor(color))
         fmt.setFontWeight(QFont.Bold if bold else QFont.Normal)
 
         cursor = self._output.textCursor()
@@ -1400,14 +1447,16 @@ class UpdatesPage(QWidget):
         else:
             self._term_blink_timer.stop()
             self._term_status_label.setText(tr("updates_terminal_idle"))
-            self._term_status_dot.setColor(QColor("#555555"))
-            self._status_dot.setColor(QColor("#555555"))
+            idle = self.palette().color(QPalette.Mid)
+            self._term_status_dot.setColor(idle)
+            self._status_dot.setColor(idle)
 
     def _toggle_term_blink(self):
         self._term_blink_on = not self._term_blink_on
-        color = "#4ADE80" if self._term_blink_on else "#1E3A24"
-        self._term_status_dot.setColor(QColor(color))
-        self._status_dot.setColor(QColor(color))
+        on = semantic_color("success", self)
+        color = on if self._term_blink_on else blend(self.palette().color(QPalette.Window), on, 0.25)
+        self._term_status_dot.setColor(color)
+        self._status_dot.setColor(color)
 
     # Actions
 
@@ -1457,7 +1506,7 @@ class UpdatesPage(QWidget):
             try:
                 if not (self._pkg_mgr == "xbps" and _xbps_be):
                     self._signals.append_output.emit(
-                        "(XBPS no disponible en este sistema, omitiendo sincronización de repos)"
+                        "(El gestor de paquetes de CuerdOS no está disponible, se omite la sincronización)"
                     )
 
                 ok, all_updates, err = _repo_sync.sync_repos_and_refresh(
@@ -1802,10 +1851,10 @@ class UpdatesPage(QWidget):
         # pantalla de búsqueda se quedaría congelada en pantalla: se
         # restaura la vista según lo que ya había antes de buscar.
         if operation == "OP_REFRESH" and not success:
-            if self._available:
-                self._page_stack.setCurrentWidget(self._content_widget)
-            else:
-                self._show_up_to_date()
+            # Un fallo interno NO es "sistema al día": nunca se muestra esa
+            # pantalla aquí; se vuelve a la vista normal, donde el aviso de
+            # error indica que la comprobación no se pudo completar.
+            self._page_stack.setCurrentWidget(self._content_widget)
 
         if success:
             update_status.clear_error()

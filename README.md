@@ -15,7 +15,7 @@ resources/     Iconos, imágenes, estilos, datos y archivos del sistema
   icons/       SVG de la aplicación y de remotos
   images/      Imágenes locales (incluido el Easter egg KDI)
   styles/      Tema Qt y hojas de estilo
-  data/        Catálogos, blacklist y datos auxiliares
+  data/        Catálogos, blacklist_xbps.kn (lista unificada) y datos auxiliares
 translations/  Catálogos JSON por idioma
 tests/         Pruebas automatizadas
 ```
@@ -77,7 +77,7 @@ Funciones principales:
   Consultar dependencias y utilidades de paquetería
 ```
 
-Con **FPM 2.0.8 o posterior**, las búsquedas también muestran resultados AppImage de AM mediante NISSA v2, con versión/tamaño del inventario e icono del catálogo cuando están disponibles. En **Ajustes → Paquetes** está la acción **«Instalar am-pack (repositorio de AppImage de portable-linux-apps.github.io)»**: usa el instalador upstream verificado por FPM, instala AppMan si hace falta y activa/sincroniza `am-FUSION`. Las instalaciones, actualizaciones y eliminaciones del catálogo AM se ejecutan mediante `fpm aimg`; FPM guarda qué frontend se eligió y la GUI prefiere AppMan en modo de usuario.
+Con **FPM 2.0.8 o posterior**, las búsquedas también muestran resultados AppImage de AM mediante PLUTO v2, con versión/tamaño del inventario e icono del catálogo cuando están disponibles. En **Ajustes → Paquetes** está la acción **«Instalar am-pack (repositorio de AppImage de portable-linux-apps.github.io)»**: usa el instalador upstream verificado por FPM, instala AppMan si hace falta y activa/sincroniza `am-FUSION`. Las instalaciones, actualizaciones y eliminaciones del catálogo AM se ejecutan mediante `fpm aimg`; FPM guarda qué frontend se eligió y la GUI prefiere AppMan en modo de usuario.
 
 Los AppImages instalados desde archivo local y desde `am-FUSION` se conservan como registros distintos. Si ambos corresponden a la misma aplicación, la copia local se muestra como **«Aplicación (Local)»** para distinguirla de la instalada desde AM.
 
@@ -85,7 +85,7 @@ Las operaciones de sistema de XBPS pueden solicitar permisos administrativos med
 
 Las tareas AppImage abren automáticamente **Tareas** con la consola visible. La salida FPM/AM se transmite en vivo incluso cuando el instalador reescribe progreso con `\r`; durante fases silenciosas se muestra una barra indeterminada y el tiempo transcurrido, sin inventar porcentajes. Cuando FPM entrega el evento estructurado `FPM_AIMG_EVENT`, la GUI muestra bytes descargados y versión detectada; si se conoce el tamaño total, también calcula el avance. La versión y el tamaño finales actualizan los datos de la aplicación. La cancelación termina el grupo de procesos FPM/AM para evitar descargas huérfanas. El supervisor común está en `backend/process_stream.py`.
 
-Si una salida AM contiene el error `sudo: a terminal is required ...` o `sudo: a password is required`, Yel-Soft marca la tarea como fallida aunque AM devuelva código cero y muestra el diagnóstico `appimage_task_privilege_required`; revisa si `pkexec`/polkit está instalado y consulta el registro visible de la tarea. La frase `sudo ... -S` pertenece al propio sudo y no indica `xbps-install -S`. FPM 2.0.8 conserva la selección AppMan/AM, el tamaño del inventario común, los metadatos NISSA v2 y emite los eventos estructurados de progreso/instalación que consume la GUI.
+Si una salida AM contiene el error `sudo: a terminal is required ...` o `sudo: a password is required`, Yel-Soft marca la tarea como fallida aunque AM devuelva código cero y muestra el diagnóstico `appimage_task_privilege_required`; revisa si `pkexec`/polkit está instalado y consulta el registro visible de la tarea. La frase `sudo ... -S` pertenece al propio sudo y no indica `xbps-install -S`. FPM 2.0.8 conserva la selección AppMan/AM, el tamaño del inventario común, los metadatos PLUTO v2 y emite los eventos estructurados de progreso/instalación que consume la GUI.
 
 Los backends se cargan antes de iniciar los hilos de tareas; esto evita errores de importación como `KeyError: 'backend'` al ejecutar la aplicación desde IDEs que interceptan imports, incluido Thonny.
 

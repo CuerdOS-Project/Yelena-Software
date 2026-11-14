@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 import core.settings as app_settings
-from resources.styles import theme as app_theme
 from .native_widgets import InstallButton
 from core.i18n import tr, set_language, SUPPORTED
 from backend.system_detect import show_xbps, show_flatpak
@@ -159,7 +158,7 @@ class _RemoteActionWorker(QThread):
 
 
 class _MirrorStatusWorker(QThread):
-    """Consulta el estado opcional de mirrors NISSA sin bloquear la interfaz."""
+    """Consulta el estado opcional de mirrors PLUTO sin bloquear la interfaz."""
     finished_ = Signal(object)
 
     def run(self):
@@ -226,7 +225,6 @@ class SettingsPage(QWidget):
 
         # Idioma activo al abrir la página (para detectar si cambió)
         self._original_lang = app_settings.get("language", "auto")
-        self._original_theme = app_settings.get("theme", "auto")
         self._remote_workers: dict[str, QThread] = {}
         self._remote_action_workers: dict[tuple[str, str], "_RemoteActionWorker"] = {}
         self._mirror_status_worker: _MirrorStatusWorker | None = None
@@ -299,6 +297,7 @@ class SettingsPage(QWidget):
             "pl": "Polski",
             "ru": "Русский",
             "gl": "Galego",
+            "de": "Deutsch",
         }
 
         self._lang_combo.addItem(lang_names["auto"], "auto")
@@ -315,36 +314,13 @@ class SettingsPage(QWidget):
         lang_row.addStretch()
         v.addLayout(lang_row)
 
-        v.addWidget(_sep())
-
-        # Tema visual
-        v.addWidget(_section_label(tr("settings_theme_section")))
-
-        theme_row = QHBoxLayout()
-        theme_row.setSpacing(12)
-        self._theme_combo = QComboBox()
-        self._theme_combo.setObjectName("settingsCombo")
-        self._theme_combo.setFixedWidth(220)
-        for key in app_theme.THEME_KEYS:
-            self._theme_combo.addItem(tr(app_theme.THEME_LABEL_KEYS[key]), key)
-        idx_theme = self._theme_combo.findData(self._original_theme)
-        if idx_theme >= 0:
-            self._theme_combo.setCurrentIndex(idx_theme)
-        theme_row.addWidget(self._theme_combo)
-        theme_row.addStretch()
-        v.addLayout(theme_row)
-
-        theme_hint = QLabel(tr("settings_theme_hint"))
-        theme_hint.setObjectName("sectionSub")
-        theme_hint.setWordWrap(True)
-        v.addWidget(theme_hint)
 
         # Package Sources
         v = package_v
         v.addWidget(_section_label(tr("settings_store")))
 
         # FPM ofrece búsqueda, inventario instalado y consulta de actualizaciones
-        # mediante NISSA v2. Las transacciones siguen bajo la autorización polkit
+        # mediante PLUTO v2. Las transacciones siguen bajo la autorización polkit
         # de Yelena; una versión antigua deja disponible solo el motor nativo.
         v.addWidget(_section_label(tr("settings_package_engine")))
         self._package_engine_combo = QComboBox()
@@ -356,8 +332,8 @@ class SettingsPage(QWidget):
         self._package_engine_combo.addItem(
             tr("settings_package_engine_fpm"), "fpm"
         )
-        from backend.fpm_backend import supports_nissa_v2
-        fpm_installed = supports_nissa_v2()
+        from backend.fpm_backend import supports_pluto_v2
+        fpm_installed = supports_pluto_v2()
         fpm_index = self._package_engine_combo.findData("fpm")
         if not fpm_installed:
             self._package_engine_combo.model().item(fpm_index).setEnabled(False)
@@ -422,6 +398,10 @@ class SettingsPage(QWidget):
         self._chk_dev_pkgs = QCheckBox(tr("settings_show_dev_packages"))
         self._chk_dev_pkgs.setChecked(app_settings.get_bool("show_dev_packages"))
         v.addWidget(self._chk_dev_pkgs)
+
+        self._chk_omit_multilib = QCheckBox(tr("settings_omit_multilib"))
+        self._chk_omit_multilib.setChecked(app_settings.get_bool("omit_multilib"))
+        v.addWidget(self._chk_omit_multilib)
 
         v.addWidget(_sep())
 
@@ -562,11 +542,11 @@ class SettingsPage(QWidget):
         tabs.addTab(package_page, tr("settings_tab_packages"))
 
         # Guardado automático: no hay botón ni línea divisora inferior.
-        for combo in (self._lang_combo, self._theme_combo):
-            combo.currentIndexChanged.connect(self._on_auto_save)
+        self._lang_combo.currentIndexChanged.connect(self._on_auto_save)
         for checkbox in (
             self._chk_flatpak,
             self._chk_dev_pkgs,
+            self._chk_omit_multilib,
             self._chk_update_status,
             self._chk_confirm_remove,
             self._chk_confirm_install,
@@ -837,14 +817,11 @@ class SettingsPage(QWidget):
         new_lang = self._lang_combo.currentData()
         lang_changed = (new_lang != self._original_lang)
 
-        new_theme = self._theme_combo.currentData()
-        theme_changed = (new_theme != self._original_theme)
-
         # Guardar todo
         app_settings.set_value("language", new_lang)
-        app_settings.set_value("theme", new_theme)
         app_settings.set_bool("show_flatpak", self._chk_flatpak.isChecked())
         app_settings.set_bool("show_dev_packages", self._chk_dev_pkgs.isChecked())
+        app_settings.set_bool("omit_multilib", self._chk_omit_multilib.isChecked())
         app_settings.set_bool("show_update_status", self._chk_update_status.isChecked())
         app_settings.set_bool("confirm_before_remove", self._chk_confirm_remove.isChecked())
         app_settings.set_bool("confirm_before_install", self._chk_confirm_install.isChecked())
@@ -866,14 +843,14 @@ class SettingsPage(QWidget):
         # Emitir señal de fuentes aunque no haya reinicio
         self.sources_changed.emit()
 
-        if lang_changed or theme_changed:
-            self._ask_restart(new_lang, new_theme, theme_changed)
+        if lang_changed:
+            self._ask_restart(new_lang)
         else:
-            # Sin cambios de idioma/tema: aplicar y guardar inmediatamente.
+            # Sin cambio de idioma: aplicar y guardar inmediatamente.
             set_language(new_lang)
             self.language_changed.emit(new_lang)
 
-    def _ask_restart(self, new_lang: str, new_theme: str, theme_changed: bool) -> None:
+    def _ask_restart(self, new_lang: str) -> None:
         """
         Muestra un diálogo preguntando si reiniciar ahora (idioma y/o tema
         cambiaron). Si acepta: reinicia app + applet. Si cancela: aplica lo
@@ -899,12 +876,6 @@ class SettingsPage(QWidget):
             # Aplicar en caliente lo mejor posible y notificar
             set_language(new_lang)
             self._original_lang = new_lang
-            if theme_changed:
-                from PySide6.QtWidgets import QApplication
-                app = QApplication.instance()
-                if app is not None:
-                    app_theme.apply_theme(app, new_theme)
-                self._original_theme = new_theme
             self.language_changed.emit(new_lang)
             # Reiniciar el applet de todas formas para que recoja el nuevo idioma
             _restart_applet()

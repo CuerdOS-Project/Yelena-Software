@@ -37,10 +37,10 @@ def _system_defaults() -> dict:
         "close_to_tray":            "false",
         # Muestra paquetes de desarrollo/librerías (-devel, lib*) en instalados
         "show_dev_packages":        "true",
+        # Omite por defecto los paquetes XBPS multilib de 32 bits en la tienda
+        "omit_multilib":            "true",
         # Confirma antes de instalar paquetes
         "confirm_before_install":   "false",
-        # Tema visual: "auto" (nativo), "csds", "yelena_system", "breeze", "fusion"
-        "theme":                    "auto",
         # Muestra en la búsqueda paquetes filtrados por la blacklist
         # (no recomendable: pueden ser paquetes de sistema, duplicados o inestables)
         "search_show_hidden":       "false",

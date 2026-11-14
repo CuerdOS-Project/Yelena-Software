@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 UPDATE_ACTIVITY_FLAG = Path.home() / ".config" / "yl-soft" / "applet_updating.flag"
@@ -89,3 +90,43 @@ def end_system_update(owner_pid: int | None = None) -> bool:
         return True
     except OSError:
         return False
+
+
+_XBPS_WRITERS = frozenset({
+    "xbps-install", "xbps-remove", "xbps-reconfigure", "xbps-pkgdb",
+})
+
+
+def _is_dry_run(args: list[str]) -> bool:
+    if "--dry-run" in args:
+        return True
+    return any(
+        a.startswith("-") and not a.startswith("--") and "n" in a[1:]
+        for a in args
+    )
+
+
+def is_external_xbps_active() -> bool:
+    """Return whether XBPS is modifying the system outside applet and GUI.
+
+    Transactions started by the applet or the GUI own the activity marker and
+    are not external. Dry runs are ignored. Any detection failure returns
+    ``False`` so a broken probe can never suppress checks permanently.
+    """
+    if is_system_update_active():
+        return False
+    try:
+        result = subprocess.run(
+            ["pgrep", "-a", "-f", r"xbps-(install|remove|reconfigure|pkgdb)"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except Exception:
+        return False
+    own_pid = str(os.getpid())
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or parts[0] == own_pid:
+            continue
+        if os.path.basename(parts[1]) in _XBPS_WRITERS and not _is_dry_run(parts[2:]):
+            return True
+    return False

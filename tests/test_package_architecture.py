@@ -4,6 +4,10 @@ from backend.models import Package, PackageSource
 
 
 class PackageArchitectureTests(unittest.TestCase):
+    def test_omit_multilib_setting_defaults_to_enabled(self):
+        from core.settings import _system_defaults
+        self.assertEqual(_system_defaults()["omit_multilib"], "true")
+
     def test_explicit_i686_architecture_is_32bit(self):
         pkg = Package(id="xbps:legacy-app", name="Legacy App", summary="", architecture="i686")
         self.assertTrue(pkg.is_32bit)
@@ -18,6 +22,13 @@ class PackageArchitectureTests(unittest.TestCase):
 
     def test_i686_package_suffix_is_recognized(self):
         pkg = Package(id="xbps:legacy-app-i686", name="legacy-app-i686", summary="")
+        self.assertTrue(pkg.is_32bit)
+
+    def test_multilib_repository_is_recognized_as_32bit(self):
+        pkg = Package(
+            id="xbps:legacy-app", name="legacy-app", summary="",
+            source=PackageSource.XBPS, repository="multilib",
+        )
         self.assertTrue(pkg.is_32bit)
 
     def test_ordinary_package_is_not_misidentified(self):

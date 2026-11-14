@@ -122,7 +122,7 @@ class Package:
                 return "AppImage (Local)"
         labels = {
             PackageSource.FLATPAK:  "Flatpak",
-            PackageSource.XBPS:     "XBPS",
+            PackageSource.XBPS:     "CuerdOS (Sistema)",
             PackageSource.LOCAL:    "Local",
             PackageSource.APPIMAGE: "AppImage",
         }
@@ -174,7 +174,10 @@ class Package:
 
     @property
     def is_32bit(self) -> bool:
-        """True solo con metadatos explícitos o un sufijo de paquete inequívoco."""
+        """True solo con metadatos explícitos o un sufijo inequívoco."""
+        repository = (self.repository or "").strip().lower()
+        if repository == "multilib":
+            return True
         arch = (self.architecture or "").strip().lower().replace("-", "_")
         if arch in {"i386", "i486", "i586", "i686", "x86_32", "x86_32bit", "32", "32bit", "32_bit"}:
             return True
