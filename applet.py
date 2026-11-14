@@ -7,10 +7,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -20,11 +22,11 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
 # PySide6
-from PySide6.QtCore import QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QLocale, QObject, QTime, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QIcon, QPalette
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QHBoxLayout,
-    QLabel, QMenu, QSystemTrayIcon, QVBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QHBoxLayout,
+    QLabel, QMenu, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget,
 )
 
 # Backend imports
@@ -37,6 +39,7 @@ try:
     from backend.update_activity import (
         begin_system_update, end_system_update,
         is_system_update_active as _is_system_update_active,
+        is_external_xbps_active,
     )
     from core.settings import load_config, save_config
     _BACKENDS_OK = True
@@ -64,6 +67,9 @@ except ImportError as _err:
     def _is_system_update_active():
         return False
 
+    def is_external_xbps_active():
+        return False
+
     def load_config():
         return {}
 
@@ -84,13 +90,13 @@ except ImportError:
             val = os.environ.get(env_var, "")
             if val:
                 code = val.split(".")[0].split("_")[0].lower()
-                if code in ("es", "en", "ca", "pt", "ja", "ko", "tr", "fr", "it", "pl", "ru"):
+                if code in ("es", "en", "ca", "pt", "ja", "ko", "tr", "fr", "it", "pl", "ru", "gl", "de"):
                     return code
         try:
             loc = _locale.getlocale()[0]
             if loc:
                 code = loc.split("_")[0].lower()
-                if code in ("es", "en", "ca", "pt", "ja", "ko", "tr", "fr", "it", "pl", "ru"):
+                if code in ("es", "en", "ca", "pt", "ja", "ko", "tr", "fr", "it", "pl", "ru", "gl", "de"):
                     return code
         except Exception:
             pass
@@ -125,6 +131,11 @@ except ImportError:
             "interval_6h":  "Every 6 hours",
             "interval_12h": "Every 12 hours",
             "interval_24h": "Every 24 hours",
+            "interval_manual": "Manual (choose day and time)",
+            "config_schedule_days": "Days:",
+            "config_schedule_time": "Time:",
+            "config_schedule_need_day": "Select at least one day.",
+            "config_schedule_saved_body": "Next check: {when}",
             "main_app_not_found": "yelena-software not found in PATH.",
             "applet_no_tray_title": "Yelena Software is running",
             "applet_no_tray_body": "No tray icon is available in this desktop session. You'll get notifications for updates instead.",
@@ -253,7 +264,6 @@ def _get_desktop_environment() -> str:
     return ""
 
 
-@lru_cache(maxsize=1)
 def _has_status_notifier_watcher() -> bool:
     """
     Comprueba si hay un StatusNotifierWatcher vivo en el bus de sesión.
@@ -275,7 +285,6 @@ def _has_status_notifier_watcher() -> bool:
         return False
 
 
-@lru_cache(maxsize=1)
 def _tray_actually_usable() -> bool:
     """
     Combina isSystemTrayAvailable() con la comprobación real de SNI.
@@ -287,7 +296,17 @@ def _tray_actually_usable() -> bool:
         return False
     if "gnome" in de and not _has_status_notifier_watcher():
         return False
+    # LXQt y otras barras (waybar, swaybar, i3bar, polybar, tint2...) pueden
+    # arrancar después del applet: sin watcher SNI el icono no aparece.
+    if _needs_sni_watcher(de) and not _has_status_notifier_watcher():
+        return False
     return True
+
+
+def _needs_sni_watcher(de: str = "") -> bool:
+    """Qt6 solo habla StatusNotifierItem; fuera de KDE exigimos el watcher."""
+    de = de or _get_desktop_environment()
+    return "kde" not in de and "plasma" not in de
 
 
 # Tray icon helper: assets SVG propios, sin resolver nombres del tema del SO.
@@ -314,13 +333,167 @@ def _notification_icon() -> str:
     return str(_APPLET_ICON_DIR / _ACTIVE_ICON_VARIANT / "idle.svg")
 
 
-def _detect_icon_variant() -> str:
-    """Elige SVG claros/oscuros según el color de fondo de la paleta Qt."""
+def _luminance_from_color(value: str) -> Optional[float]:
+    """Luminancia 0..1 de '#rgb', '#rrggbb', '#aarrggbb', 'rgb(r,g,b)' o 'r,g,b'."""
+    value = (value or "").strip().strip("\"'")
     try:
-        background = QApplication.palette().color(QPalette.ColorRole.Window)
-        return "dark" if background.lightnessF() < 0.5 else "light"
+        if value.startswith("#"):
+            h = value[1:]
+            if len(h) == 3:
+                h = "".join(c * 2 for c in h)
+            if len(h) == 8:          # QSS/Qt: #aarrggbb
+                h = h[2:]
+            if len(h) != 6:
+                return None
+            r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        else:
+            nums = re.findall(r"\d+", value)
+            if len(nums) < 3:
+                return None
+            r, g, b = (int(n) for n in nums[:3])
+    except ValueError:
+        return None
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+
+
+def _read_ini(path: Path) -> Dict[str, Dict[str, str]]:
+    import configparser
+    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+    cp.optionxform = str
+    try:
+        cp.read(path, encoding="utf-8")
     except Exception:
-        return "light"
+        return {}
+    return {sec: dict(cp.items(sec)) for sec in cp.sections()}
+
+
+def _xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+
+
+def _lxqt_panel_is_dark() -> Optional[bool]:
+    """Color real del panel de LXQt (no el de la paleta de la app)."""
+    cfg = _xdg_config_home()
+    # 1) Panel con color propio
+    panel = _read_ini(cfg / "lxqt" / "panel.conf")
+    for sec, vals in panel.items():
+        if vals.get("background-color") and str(vals.get("opacity", "100")) != "0":
+            lum = _luminance_from_color(vals["background-color"])
+            if lum is not None and vals.get("background-image", "") == "":
+                return lum < 0.5
+    # 2) Tema de LXQt: lxqt-panel.qss / paleta del tema
+    theme = _read_ini(cfg / "lxqt" / "lxqt.conf").get("General", {}).get("theme", "")
+    if theme:
+        dirs = [Path.home() / ".local/share/lxqt/themes", Path("/usr/share/lxqt/themes"),
+                Path("/usr/local/share/lxqt/themes")]
+        for d in dirs:
+            qss = d / theme / "lxqt-panel.qss"
+            if qss.is_file():
+                try:
+                    txt = qss.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                m = re.search(r"#BackgroundWidget\s*\{[^}]*?background(?:-color)?\s*:\s*([^;]+);", txt, re.S)
+                if m:
+                    lum = _luminance_from_color(m.group(1))
+                    if lum is not None:
+                        return lum < 0.5
+                m = re.search(r"#LxQtPanel[^{]*\{[^}]*?\bcolor\s*:\s*([^;]+);", txt, re.S)
+                if m:   # texto claro => panel oscuro
+                    lum = _luminance_from_color(m.group(1))
+                    if lum is not None:
+                        return lum > 0.5
+    return None
+
+
+def _gtk_theme_is_dark() -> Optional[bool]:
+    """XFCE, MATE, Cinnamon, i3/sway/polybar con GTK, etc."""
+    scheme = os.environ.get("GTK_THEME", "")
+    if scheme:
+        return "dark" in scheme.lower()
+    for ini in (_xdg_config_home() / "gtk-3.0" / "settings.ini",
+                _xdg_config_home() / "gtk-4.0" / "settings.ini"):
+        vals = _read_ini(ini).get("Settings", {})
+        if vals.get("gtk-application-prefer-dark-theme", "").lower() in ("1", "true"):
+            return True
+        name = vals.get("gtk-theme-name", "")
+        if name:
+            return "dark" in name.lower()
+    try:
+        out = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True, text=True, timeout=1.0).stdout.lower()
+        if "dark" in out:
+            return True
+        if "default" in out or "light" in out:
+            return False
+    except Exception:
+        pass
+    return None
+
+
+def _kde_is_dark() -> Optional[bool]:
+    vals = _read_ini(_xdg_config_home() / "kdeglobals").get("Colors:Window", {})
+    lum = _luminance_from_color(vals.get("BackgroundNormal", ""))
+    return None if lum is None else lum < 0.5
+
+
+def _detect_icon_variant() -> str:
+    """Variante 'light'/'dark' del icono, pensada para el color de la BARRA.
+
+    Orden: YL_SOFT_TRAY_ICON (light|dark) > panel real del escritorio
+    (LXQt, KDE, GTK) > paleta de Qt. 'light' = trazo oscuro (barra clara);
+    'dark' = trazo claro (barra oscura).
+    """
+    forced = os.environ.get("YL_SOFT_TRAY_ICON", "").strip().lower()
+    if forced in _ICON_VARIANTS:
+        return forced
+    de = _get_desktop_environment()
+    session = os.environ.get("XDG_SESSION_DESKTOP", "").lower()
+    dark: Optional[bool] = None
+    try:
+        if "lxqt" in de or "lxqt" in session:
+            dark = _lxqt_panel_is_dark()
+        elif "kde" in de or "plasma" in de:
+            dark = _kde_is_dark()
+        if dark is None:
+            dark = _gtk_theme_is_dark() if "lxqt" not in de else None
+        if dark is None:
+            bg = QApplication.palette().color(QPalette.ColorRole.Window)
+            dark = bg.lightnessF() < 0.5
+    except Exception:
+        dark = False
+    return "dark" if dark else "light"
+
+
+def _load_svg_icon(path: Path) -> QIcon:
+    """QIcon desde SVG con pixmaps explícitos.
+
+    Algunas barras (LXQt/SNI) reciben solo pixmaps y no pueden usar el motor
+    de iconos SVG de Qt; si falta qt6-svg, QIcon(path) queda vacío en silencio.
+    """
+    if not path.is_file():
+        return QIcon()
+    icon = QIcon()
+    try:
+        from PySide6.QtCore import QRectF, Qt
+        from PySide6.QtGui import QImage, QPainter, QPixmap
+        from PySide6.QtSvg import QSvgRenderer
+        renderer = QSvgRenderer(str(path))
+        if renderer.isValid():
+            for size in (16, 22, 24, 32, 48, 64, 96):
+                img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+                img.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(img)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                renderer.render(painter, QRectF(0, 0, size, size))
+                painter.end()
+                icon.addPixmap(QPixmap.fromImage(img))
+    except Exception as exc:
+        logger.debug(f"QtSvg no disponible ({exc}); usando QIcon(path)")
+    if icon.isNull():
+        icon = QIcon(str(path))
+    return icon
 
 
 def _build_state_icons() -> None:
@@ -331,15 +504,16 @@ def _build_state_icons() -> None:
     _MENU_ICONS.clear()
     for variant in _ICON_VARIANTS:
         for state in _ICON_STATES:
-            path = _APPLET_ICON_DIR / variant / f"{state}.svg"
-            _STATE_ICONS[(state, variant)] = QIcon(str(path)) if path.is_file() else QIcon()
+            _STATE_ICONS[(state, variant)] = _load_svg_icon(_APPLET_ICON_DIR / variant / f"{state}.svg")
         for name in _MENU_ICON_NAMES:
-            path = _APPLET_ICON_DIR / variant / f"{name}.svg"
-            _MENU_ICONS[(name, variant)] = QIcon(str(path)) if path.is_file() else QIcon()
+            _MENU_ICONS[(name, variant)] = _load_svg_icon(_APPLET_ICON_DIR / variant / f"{name}.svg")
 
 
 def _state_icon(state: str) -> QIcon:
-    return _STATE_ICONS.get((state, _ACTIVE_ICON_VARIANT), QIcon())
+    icon = _STATE_ICONS.get((state, _ACTIVE_ICON_VARIANT), QIcon())
+    if icon.isNull():   # último recurso: icono del tema (nunca bandeja vacía)
+        icon = QIcon.fromTheme("system-software-update")
+    return icon
 
 
 def _menu_icon(name: str) -> QIcon:
@@ -389,6 +563,44 @@ def _fetch_updates(pkg_mgr: str, errors: Optional[List[str]] = None) -> List[Dic
     return updates
 
 
+# Programación manual (día y hora)
+
+_DEFAULT_SCHEDULE_TIME = "09:00"
+
+
+def _parse_hhmm(value: str) -> tuple[int, int]:
+    try:
+        h, m = str(value).split(":")[:2]
+        h, m = int(h), int(m)
+        if 0 <= h < 24 and 0 <= m < 60:
+            return h, m
+    except (ValueError, TypeError):
+        pass
+    h, m = _DEFAULT_SCHEDULE_TIME.split(":")
+    return int(h), int(m)
+
+
+def _normalize_days(days) -> List[int]:
+    """Lista ordenada de días válidos (0=lunes … 6=domingo); vacío => todos."""
+    try:
+        out = sorted({int(d) for d in days if 0 <= int(d) <= 6})
+    except (TypeError, ValueError):
+        out = []
+    return out or list(range(7))
+
+
+def next_scheduled_run(now: datetime, days, hhmm: str) -> datetime:
+    """Próxima ejecución estrictamente posterior a `now` en alguno de `days`."""
+    days = _normalize_days(days)
+    h, m = _parse_hhmm(hhmm)
+    for offset in range(0, 8):
+        cand = (now + timedelta(days=offset)).replace(
+            hour=h, minute=m, second=0, microsecond=0)
+        if cand > now and cand.weekday() in days:
+            return cand
+    return now + timedelta(days=1)   # inalcanzable
+
+
 # Config dialog
 
 class _ConfigDialog(QDialog):
@@ -401,7 +613,9 @@ class _ConfigDialog(QDialog):
         (86400, "interval_24h"),
     ]
 
-    def __init__(self, current_interval: int, parent=None):
+    def __init__(self, current_interval: int, parent=None,
+                 mode: str = "interval", days=None,
+                 schedule_time: str = _DEFAULT_SCHEDULE_TIME):
         super().__init__(parent)
         self.setWindowTitle(tr("config_dialog_title"))
         self.setMinimumWidth(340)
@@ -420,8 +634,43 @@ class _ConfigDialog(QDialog):
             (i for i, (s, _) in enumerate(self._INTERVALS) if s == current_interval),
             2,
         )
-        self._combo.setCurrentIndex(idx)
+        self._combo.addItem(tr("interval_manual"), 0)   # 0 => día y hora
+        self._combo.setCurrentIndex(
+            len(self._INTERVALS) if mode == "schedule" else idx)
         layout.addWidget(self._combo)
+
+        # Opciones de día y hora (solo con «Manual»)
+        self._sched = QWidget()
+        sl = QVBoxLayout(self._sched)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(8)
+        sl.addWidget(QLabel(tr("config_schedule_days")))
+        days_row = QHBoxLayout()
+        self._day_boxes: List[QCheckBox] = []
+        selected = set(_normalize_days(days if days is not None else range(7)))
+        loc = QLocale()
+        for i in range(7):                       # Qt: 1=lunes … 7=domingo
+            cb = QCheckBox(loc.dayName(i + 1, QLocale.FormatType.ShortFormat))
+            cb.setChecked(i in selected)
+            self._day_boxes.append(cb)
+            days_row.addWidget(cb)
+        sl.addLayout(days_row)
+        time_row = QHBoxLayout()
+        time_row.addWidget(QLabel(tr("config_schedule_time")))
+        self._time = QTimeEdit()
+        self._time.setDisplayFormat("HH:mm")
+        h, m = _parse_hhmm(schedule_time)
+        self._time.setTime(QTime(h, m))
+        time_row.addWidget(self._time)
+        time_row.addStretch()
+        sl.addLayout(time_row)
+        self._need_day = QLabel(tr("config_schedule_need_day"))
+        self._need_day.setStyleSheet("color: #c0392b;")
+        self._need_day.hide()
+        sl.addWidget(self._need_day)
+        layout.addWidget(self._sched)
+        self._combo.currentIndexChanged.connect(self._on_mode_changed)
+        self._on_mode_changed()
 
         btns = QHBoxLayout()
         btns.addStretch()
@@ -429,13 +678,34 @@ class _ConfigDialog(QDialog):
         save_btn   = _flat_button(tr("config_dialog_save"))
         save_btn.setDefault(True)
         cancel_btn.clicked.connect(self.reject)
-        save_btn.clicked.connect(self.accept)
+        save_btn.clicked.connect(self._on_save)
         btns.addWidget(cancel_btn)
         btns.addWidget(save_btn)
         layout.addLayout(btns)
 
+    def _is_schedule(self) -> bool:
+        return self._combo.currentData() == 0
+
+    def _on_mode_changed(self) -> None:
+        self._sched.setVisible(self._is_schedule())
+        self.adjustSize()
+
+    def _on_save(self) -> None:
+        if self._is_schedule() and not any(cb.isChecked() for cb in self._day_boxes):
+            self._need_day.show()
+            return
+        self.accept()
+
     def selected_interval(self) -> int:
         return self._combo.currentData() or 14400
+
+    def selected_schedule(self) -> Dict:
+        """Config elegida: modo, días (0=lun…6=dom) y hora HH:MM."""
+        return {
+            "update_mode": "schedule" if self._is_schedule() else "interval",
+            "schedule_days": [i for i, cb in enumerate(self._day_boxes) if cb.isChecked()],
+            "schedule_time": self._time.time().toString("HH:mm"),
+        }
 
 
 def _flat_button(label: str):
@@ -486,6 +756,7 @@ class _InteractiveNotifier(QObject):
                     "/org/freedesktop/Notifications",
                     "org.freedesktop.Notifications",
                     "ActionInvoked",
+                    self,
                     self._on_action_invoked,
                 )
         except Exception as exc:
@@ -624,8 +895,13 @@ class YelenaApplet:
         # Intervalo
         cfg_data             = self._load_config()
         self._interval       = cfg_data.get("update_interval_seconds", 14400)
+        self._mode           = cfg_data.get("update_mode", "interval")
+        self._sched_days     = _normalize_days(cfg_data.get("schedule_days"))
+        self._sched_time     = cfg_data.get("schedule_time", _DEFAULT_SCHEDULE_TIME)
+        self._next_run: Optional[datetime] = None
         if background_mode:
             self._interval = _BG_INTERVAL_SECS
+            self._mode = "interval"
 
         # Bandeja
         self._tray: Optional[QSystemTrayIcon] = None
@@ -646,6 +922,7 @@ class YelenaApplet:
                     "notificaciones con acciones."
                 )
                 self._notify_no_tray_once()
+                self._start_tray_retry()
 
         # Monitor de idioma: sincroniza con la GUI si el usuario cambia el idioma
         self._current_lang_key = self._read_lang_key()
@@ -665,8 +942,8 @@ class YelenaApplet:
 
         # Timer principal de comprobación (periódico — nunca bloqueado por startup limit)
         self._check_timer = QTimer()
-        self._check_timer.setInterval(self._interval * 1000)
-        self._check_timer.timeout.connect(lambda: self._do_check(periodic=True))
+        self._check_timer.timeout.connect(self._on_check_timer)
+        self._apply_timer_mode()
         self._check_timer.start()
         self._timers.append(self._check_timer)
 
@@ -741,6 +1018,32 @@ class YelenaApplet:
             state = "error" if self._check_error else "pending" if self._count > 0 else "idle"
             _set_tray_icon_state(self._tray, state, tip)
         self._refresh_tray_status()
+
+    def _start_tray_retry(self) -> None:
+        """LXQt/waybar/etc. pueden iniciar el panel después del applet (autostart):
+        reintenta cada 3 s hasta 2 min y crea la bandeja cuando aparezca."""
+        self._tray_retries = 0
+        self._tray_retry_timer = QTimer()
+        self._tray_retry_timer.setInterval(3000)
+        self._tray_retry_timer.timeout.connect(self._retry_tray)
+        self._tray_retry_timer.start()
+        self._timers.append(self._tray_retry_timer)
+
+    def _retry_tray(self) -> None:
+        if self._shutting_down or self._tray is not None:
+            self._tray_retry_timer.stop()
+            return
+        self._tray_retries += 1
+        if _tray_actually_usable():
+            _build_state_icons()
+            self._trayless_mode = False
+            self._setup_tray()
+            if self._tray is not None:
+                logger.info("Bandeja disponible tras reintento; icono creado")
+                self._tray_retry_timer.stop()
+                return
+        if self._tray_retries >= 40:
+            self._tray_retry_timer.stop()
 
     def _sync_icon_theme(self) -> None:
         """Aplica la familia SVG clara/oscura si cambió la paleta del sistema."""
@@ -1002,6 +1305,11 @@ class YelenaApplet:
                 return
         if self._check_running:
             return
+        # XBPS ajeno al applet y a la GUI: se omite esta comprobación sin
+        # tocar la BD ni el estado; el siguiente intervalo vuelve a buscar.
+        if not manual and is_external_xbps_active():
+            logger.info("External XBPS activity detected, check skipped")
+            return
         self._check_running = True
         # Solo los checks de arranque consumen el contador
         if not manual and not periodic:
@@ -1200,18 +1508,54 @@ class YelenaApplet:
             end_system_update(owner_pid)
             self._poll_update_activity()
 
+    def _apply_timer_mode(self) -> None:
+        """Ajusta el timer: intervalo fijo o sondeo cada 30 s hacia la hora
+        programada (robusto ante suspensión del equipo)."""
+        if self._mode == "schedule":
+            self._next_run = next_scheduled_run(
+                datetime.now(), self._sched_days, self._sched_time)
+            self._check_timer.setInterval(30_000)
+            logger.info(f"Next scheduled check: {self._next_run:%Y-%m-%d %H:%M}")
+        else:
+            self._next_run = None
+            self._check_timer.setInterval(self._interval * 1000)
+
+    def _on_check_timer(self) -> None:
+        if self._mode == "schedule":
+            if self._next_run is None or datetime.now() < self._next_run:
+                return
+            self._next_run = next_scheduled_run(
+                datetime.now(), self._sched_days, self._sched_time)
+        self._do_check(periodic=True)
+
     def _open_settings(self) -> None:
         if self.background_mode:
             return
-        dlg = _ConfigDialog(self._interval)
+        dlg = _ConfigDialog(self._interval, mode=self._mode,
+                            days=self._sched_days, schedule_time=self._sched_time)
         if dlg.exec() == QDialog.DialogCode.Accepted:
+            sched = dlg.selected_schedule()
             new_iv = dlg.selected_interval()
-            if new_iv > 0:
-                cfg = self._load_config()
+            cfg = self._load_config()
+            cfg.update(sched)
+            self._mode = sched["update_mode"]
+            self._sched_days = _normalize_days(sched["schedule_days"])
+            self._sched_time = sched["schedule_time"]
+            if self._mode == "schedule":
+                self._save_config(cfg)
+                self._apply_timer_mode()
+                when = f"{self._next_run:%a %Y-%m-%d %H:%M}"
+                logger.info(f"Schedule updated: days={self._sched_days} "
+                            f"time={self._sched_time}")
+                self._signals.notify.emit(
+                    tr("config_dialog_saved_title"),
+                    tr("config_schedule_saved_body").format(when=when),
+                )
+            elif new_iv > 0:
                 cfg["update_interval_seconds"] = new_iv
                 self._save_config(cfg)
                 self._interval = new_iv
-                self._check_timer.setInterval(new_iv * 1000)
+                self._apply_timer_mode()
                 logger.info(f"Interval updated: {new_iv} s")
                 self._signals.notify.emit(
                     tr("config_dialog_saved_title"),
@@ -1244,7 +1588,7 @@ class YelenaApplet:
             self._notified = 0
             self._suppress_check_notifications = False
             self._do_check(periodic=True)
-            self._check_timer.setInterval(self._interval * 1000)
+            self._apply_timer_mode()
             self._check_timer.start()
 
         QTimer.singleShot(5000, _do)
@@ -1306,8 +1650,15 @@ def main() -> int:
     else:
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
+    # LXQt / otras barras: sin plataforma-tema, Qt ignora el tema del escritorio.
+    de = _get_desktop_environment()
+    if "lxqt" in de:
+        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "lxqt")
     app = QApplication(sys.argv)
     app.setApplicationName("yl-soft-applet")
+    # El applet no tiene un .desktop de aplicación propio: comparte el ID
+    # instalado por la tienda para que el portal pueda resolver sus metadatos.
+    app.setDesktopFileName("yl-soft")
     app.setQuitOnLastWindowClosed(False)
 
     # Icono de la aplicación tomado del conjunto propio, no del tema del SO.

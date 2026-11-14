@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QSize, QEvent
 from PySide6.QtGui import (
-    QColor, QPalette, QPainter, QFontDatabase,
+    QColor, QPalette, QPainter,
     QTextCharFormat, QSyntaxHighlighter, QGuiApplication, QCursor,
 )
 from PySide6.QtWidgets import (
@@ -34,6 +34,7 @@ from .native_widgets import (
 )
 from .chibi_widget import ChibiPlaceholder
 from .icon_widget import AppIconWidget
+from .theme import mono_font, scaled_font
 
 _ACTIVE   = (TaskState.PENDING, TaskState.RUNNING)
 _FINISHED = (TaskState.DONE, TaskState.FAILED, TaskState.CANCELLED)
@@ -372,11 +373,10 @@ class TaskRow(CardFrame):
         lb.addLayout(bar)
 
         self._console = QPlainTextEdit()
-        self._console.setObjectName("taskConsole")
         self._console.setReadOnly(True)
         self._console.setLineWrapMode(QPlainTextEdit.NoWrap)
         self._console.setMaximumBlockCount(_MAX_LINES + 2)
-        self._console.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self._console.setFont(mono_font(self._console.font()))
         self._console.setUndoRedoEnabled(False)
         self._console.setFixedHeight(190)
         self._hl = _OutputHighlighter(self._console.document(), _is_dark(self.palette()))
@@ -459,14 +459,6 @@ class TaskRow(CardFrame):
     def _apply_palette(self) -> None:
         pal = self.palette()
         dark = _is_dark(pal)
-        bg, fg = ("#1b1d20", "#d6d9dd") if dark else ("#fbfbfc", "#24292f")
-        border = _mix(pal.color(QPalette.Window), pal.color(QPalette.WindowText), 0.20).name()
-        self._console.setStyleSheet(
-            f"QPlainTextEdit#taskConsole {{ background: {bg}; color: {fg}; "
-            f"border: 1px solid {border}; border-radius: 6px; padding: 6px; "
-            f"selection-background-color: {pal.color(QPalette.Highlight).name()}; "
-            f"selection-color: {pal.color(QPalette.HighlightedText).name()}; }}"
-        )
         self._hl.set_dark(dark)
         _refresh_icons(self)
         pm = symbolic_icon("terminal", color=pal.color(QPalette.WindowText),
@@ -622,20 +614,11 @@ class TasksPage(QWidget):
         bar_lay.addStretch(1)
 
         self._clear_btn = QPushButton(" " + tr("tasks_clear_finished"))
-        _set_icon(self._clear_btn, "broom", on_accent=True)
-        self._clear_btn.setObjectName("tasksClearFinished")
+        _set_icon(self._clear_btn, "broom")
         self._clear_btn.setCursor(Qt.PointingHandCursor)
         self._clear_btn.setAutoDefault(False)
         self._clear_btn.setFixedHeight(32)
-        self._clear_btn.setStyleSheet(
-            "QPushButton#tasksClearFinished { background: palette(highlight); "
-            "color: palette(highlighted-text); border: none; border-radius: 8px; "
-            "padding: 0 14px; font-weight: bold; }"
-            "QPushButton#tasksClearFinished:hover { background: palette(highlight); "
-            "border: 2px solid rgba(255,255,255,70); }"
-            "QPushButton#tasksClearFinished:disabled { background: palette(mid); "
-            "color: palette(window); }"
-        )
+        self._clear_btn.setFont(scaled_font(self._clear_btn.font(), bold=True))
         self._clear_btn.clicked.connect(self._tm.clear_finished)
         bar_lay.addWidget(self._clear_btn)
         root.addWidget(bar)

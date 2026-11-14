@@ -8,7 +8,7 @@ from engine import package_engine
 from backend.models import PackageStatus
 
 
-def response(event, payload=None, ok=None, error=None, protocol="NISSA", version=1):
+def response(event, payload=None, ok=None, error=None, protocol="PLUTO", version=1):
     return json.dumps({
         "protocol": protocol,
         "version": version,
@@ -27,7 +27,7 @@ def stream(event, rows, version=2):
 
 
 class FpmBackendTests(unittest.TestCase):
-    def test_parses_nissa_search_results(self):
+    def test_parses_pluto_search_results(self):
         output = "\n".join([
             response("search.result", {
                 "name": "firefox", "version": "128.0_1",
@@ -39,7 +39,7 @@ class FpmBackendTests(unittest.TestCase):
             }),
             response("search.done", {"ok": True, "count": 2}, ok=True),
         ])
-        rows = fpm_backend._parse_nissa_search(output)
+        rows = fpm_backend._parse_pluto_search(output)
         self.assertEqual([p.name for p in rows], ["firefox", "firefox-i18n"])
         self.assertEqual(rows[0].version, "128.0_1")
         self.assertEqual(rows[0].status, PackageStatus.INSTALLED)
@@ -57,7 +57,7 @@ class FpmBackendTests(unittest.TestCase):
             }, version=2),
             response("search.done", {"ok": True, "count": 1}, ok=True, version=2),
         ])
-        rows = fpm_backend._parse_nissa_search(output, version=2)
+        rows = fpm_backend._parse_pluto_search(output, version=2)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].name, "Firefox")
         self.assertEqual(rows[0].pkgname, "Firefox-AppImage")
@@ -80,7 +80,7 @@ class FpmBackendTests(unittest.TestCase):
             response("search.done", {"ok": True, "count": 1, "complete": False},
                      ok=True, version=2),
         ])
-        rows = fpm_backend._parse_nissa_search(output, version=2)
+        rows = fpm_backend._parse_pluto_search(output, version=2)
         self.assertEqual([row.name for row in rows], ["GIMP"])
 
     def test_rejects_incomplete_or_wrong_protocol_stream(self):
@@ -96,13 +96,13 @@ class FpmBackendTests(unittest.TestCase):
         mismatched_count = response(
             "search.done", {"ok": True, "count": 2}, ok=True
         )
-        self.assertEqual(fpm_backend._parse_nissa_search(result_only), [])
-        self.assertEqual(fpm_backend._parse_nissa_search(wrong_version), [])
-        self.assertEqual(fpm_backend._parse_nissa_search(wrong_protocol), [])
-        self.assertEqual(fpm_backend._parse_nissa_search(mismatched_count), [])
+        self.assertEqual(fpm_backend._parse_pluto_search(result_only), [])
+        self.assertEqual(fpm_backend._parse_pluto_search(wrong_version), [])
+        self.assertEqual(fpm_backend._parse_pluto_search(wrong_protocol), [])
+        self.assertEqual(fpm_backend._parse_pluto_search(mismatched_count), [])
 
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
     def test_search_uses_v2_when_supported(self, run, _supports, _path):
         run.return_value = SimpleNamespace(
@@ -114,7 +114,7 @@ class FpmBackendTests(unittest.TestCase):
         )
         rows = fpm_backend.search("firefox", limit=5)
         run.assert_called_once_with(
-            ["/usr/bin/fpm", "nissa", "v2", "search", "firefox"],
+            ["/usr/bin/fpm", "pluto", "v2", "search", "firefox"],
             capture_output=True, text=True, timeout=30, check=False,
             close_fds=True,
         )
@@ -122,9 +122,9 @@ class FpmBackendTests(unittest.TestCase):
 
     @patch("backend.xbps_backend.search")
     @patch.object(fpm_backend, "_request", return_value=[])
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    def test_invalid_nissa_search_falls_back_to_native_xbps(
+    def test_invalid_pluto_search_falls_back_to_native_xbps(
         self, _path, _supports, _request, native_search
     ):
         native_search.return_value = []
@@ -132,7 +132,7 @@ class FpmBackendTests(unittest.TestCase):
         native_search.assert_called_once_with("firefox", 5000)
 
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
     def test_search_preserves_optional_architecture_field(self, run, _supports, _path):
         run.return_value = SimpleNamespace(
@@ -144,16 +144,16 @@ class FpmBackendTests(unittest.TestCase):
         rows = fpm_backend.search("lib32-example")
         self.assertEqual(rows[0].architecture, "i686")
 
-    @patch.object(fpm_backend, "supports_nissa_am_search", return_value=True)
+    @patch.object(fpm_backend, "supports_pluto_am_search", return_value=True)
     @patch.object(fpm_backend, "_request")
-    def test_search_am_filters_the_combined_nissa_stream(self, request, _supports):
+    def test_search_am_filters_the_combined_pluto_stream(self, request, _supports):
         request.return_value = [
-            {"protocol": "NISSA", "version": 2, "signal": "search.result",
+            {"protocol": "PLUTO", "version": 2, "signal": "search.result",
              "payload": {"name": "xterm", "manager": "xbps"}},
-            {"protocol": "NISSA", "version": 2, "signal": "search.result",
+            {"protocol": "PLUTO", "version": 2, "signal": "search.result",
              "payload": {"name": "GIMP-AppImage", "manager": "am",
                          "repository": "am-FUSION", "version": "3.0"}},
-            {"protocol": "NISSA", "version": 2, "signal": "search.done",
+            {"protocol": "PLUTO", "version": 2, "signal": "search.done",
              "payload": {"ok": True, "count": 2}, "ok": True},
         ]
         rows = fpm_backend.search_am("gimp")
@@ -162,7 +162,7 @@ class FpmBackendTests(unittest.TestCase):
         self.assertEqual(rows[0].source.value, "appimage")
 
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
     def test_installed_inventory_is_parsed_from_v2(self, run, _supports, _path):
         run.return_value = SimpleNamespace(
@@ -176,10 +176,10 @@ class FpmBackendTests(unittest.TestCase):
         self.assertEqual(rows[0].name, "firefox")
         self.assertEqual(rows[0].installed_version, "128.0_1")
         self.assertEqual(rows[0].status, PackageStatus.INSTALLED)
-        self.assertEqual(run.call_args.args[0], ["/usr/bin/fpm", "nissa", "v2", "installed"])
+        self.assertEqual(run.call_args.args[0], ["/usr/bin/fpm", "pluto", "v2", "installed"])
 
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
     def test_updates_are_mapped_for_updates_database(self, run, _supports, _path):
         run.return_value = SimpleNamespace(
@@ -195,7 +195,7 @@ class FpmBackendTests(unittest.TestCase):
         self.assertEqual(updates[0]["manager"], "xbps")
 
     @patch.object(fpm_backend, "fpm_path", return_value="/usr/bin/fpm")
-    @patch.object(fpm_backend, "_supports_nissa_v2", return_value=True)
+    @patch.object(fpm_backend, "_supports_pluto_v2", return_value=True)
     @patch.object(fpm_backend.subprocess, "run")
     def test_get_details_returns_structured_package(self, run, _supports, _path):
         run.return_value = SimpleNamespace(stdout="\n".join([
@@ -221,30 +221,30 @@ class FpmBackendTests(unittest.TestCase):
 
     @patch("backend.xbps_backend.get_details")
     @patch.object(fpm_backend, "_request", return_value=[])
-    def test_invalid_nissa_details_fall_back_to_native_xbps(self, _request, native_details):
+    def test_invalid_pluto_details_fall_back_to_native_xbps(self, _request, native_details):
         native_details.return_value = None
         self.assertIsNone(fpm_backend.get_details("firefox"))
         native_details.assert_called_once_with("firefox")
 
     @patch.object(package_engine, "configured_engine", return_value="fpm")
-    @patch("backend.fpm_backend.supports_nissa_v2", return_value=False)
+    @patch("backend.fpm_backend.supports_pluto_v2", return_value=False)
     def test_missing_or_incompatible_fpm_falls_back_to_native_search(self, _supports, _configured):
         self.assertEqual(package_engine.get_active_engine(), "yelena-buddies")
 
     @patch.object(package_engine, "configured_engine", return_value="fpm")
-    @patch("backend.fpm_backend.supports_nissa_v2", return_value=True)
-    def test_selects_fpm_for_search_when_nissa_is_available(self, _supports, _configured):
+    @patch("backend.fpm_backend.supports_pluto_v2", return_value=True)
+    def test_selects_fpm_for_search_when_pluto_is_available(self, _supports, _configured):
         self.assertEqual(package_engine.get_active_engine(), "fpm")
         self.assertIs(package_engine.get_search_backend(), fpm_backend)
 
     @patch.object(package_engine, "configured_engine", return_value="fpm")
-    @patch("backend.fpm_backend.supports_nissa_v2", return_value=True)
+    @patch("backend.fpm_backend.supports_pluto_v2", return_value=True)
     def test_selects_fpm_for_installed_inventory_and_updates(self, _supports, _configured):
         self.assertIs(package_engine.get_inventory_backend(), fpm_backend)
         self.assertIs(package_engine.get_updates_backend(), fpm_backend)
 
     @patch.object(package_engine, "configured_engine", return_value="fpm")
-    @patch("backend.fpm_backend.supports_nissa_v2", return_value=False)
+    @patch("backend.fpm_backend.supports_pluto_v2", return_value=False)
     def test_v1_fpm_keeps_search_but_falls_back_for_inventory(self, _supports, _configured):
         from backend import xbps_backend
         self.assertIs(package_engine.get_inventory_backend(), xbps_backend)

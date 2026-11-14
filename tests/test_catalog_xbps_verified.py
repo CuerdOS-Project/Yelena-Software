@@ -111,6 +111,9 @@ class VerifiedXbpsCatalogTests(unittest.TestCase):
         self.assertIn("personalizable", app.get("summary", "").lower())
         self.assertNotIn("avanzado", app.get("summary", "").lower())
 
+    def test_vivaldi_is_first_in_home_priority(self):
+        self.assertEqual(HOME_KNOWN_APP_ORDER[0], "xbps:vivaldi")
+
     def test_home_priority_contains_recognizable_available_apps(self):
         for app_id in HOME_KNOWN_APP_ORDER:
             with self.subTest(app_id=app_id):

@@ -4,21 +4,24 @@ from __future__ import annotations
 import re
 import threading
 import time
+import unicodedata
 from typing import List, Dict
 
 from PySide6.QtCore import Qt, Signal, QThread, Slot, QTimer, QEvent, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QScrollArea, QFrame, QSizePolicy, QPushButton,
-    QComboBox, QMessageBox,
+    QComboBox, QMessageBox, QToolButton,
 )
 
 from backend.models import Package, PackageSource
+from backend.dedupe import dedupe_xbps, xbps_keys
 from backend.system_detect import show_xbps, show_flatpak, show_appimage
 from core.i18n import tr
 from .icon_widget import AppIconWidget
 from .chibi_widget import ChibiPlaceholder
 from PySide6.QtGui import QPalette
+from .theme import Surface
 from .native_widgets import (
     BadgeLabel, CardFrame, MultilineElideLabel, CompactInstallButton,
     SlidingLoadingBar, symbolic_icon, highlight_html,
@@ -31,11 +34,62 @@ from .native_widgets import (
 # por lotes (ver _process_render_batch) para que la GUI no se congele.
 _SEARCH_LIMIT = 10_000_000
 
-# Los resultados llegan "a goteo": el primero se emite al instante y el resto
-# se agrupa en lotes para no inundar la GUI con una señal por paquete.
-_BATCH_MAX = 24          # paquetes por lote como máximo
+# Los resultados llegan en bloques acotados. Los catálogos que el backend
+# devuelve como una lista completa también se dividen antes de llegar a la GUI.
+_BATCH_MAX = 200         # máximo de paquetes por lote
 _BATCH_INTERVAL = 0.08   # segundos máximos que un lote espera antes de salir
 _INSTALLED_INDEX_WAIT = 2.0
+
+
+def _search_normalize(value: str) -> str:
+    """Normaliza acentos y separadores para ordenar coincidencias reales."""
+    value = unicodedata.normalize("NFKD", (value or "").casefold())
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    # Mantener las letras de cualquier alfabeto; limitarlo a ASCII rompería
+    # la búsqueda y el orden por relevancia en idiomas CJK, ruso, etc.
+    return " ".join(re.findall(r"[^\W_]+", value, flags=re.UNICODE)).strip()
+
+
+def _relevance_key(pkg: Package, query: str) -> tuple[int, int]:
+    """Da prioridad a nombre/ID exactos, luego prefijos y al final descripción.
+
+    La clave intencionalmente no desempata por nombre: `sorted` es estable y
+    conserva el orden de llegada del backend entre coincidencias equivalentes.
+    """
+    q = _search_normalize(query)
+    if not q:
+        return (99, 0)
+    name = _search_normalize(pkg.name)
+    identifiers = [_search_normalize(getattr(pkg, field, ""))
+                   for field in ("pkgname", "appstream_id", "id")]
+    identifiers = [value.split(" ", 1)[-1] if value.startswith(("xbps ", "flatpak ", "appimage ")) else value
+                   for value in identifiers if value]
+    summary = _search_normalize(pkg.summary)
+    description = _search_normalize(pkg.description)
+
+    if name == q:
+        return (0, len(name))
+    if q in identifiers:
+        return (1, min(map(len, (value for value in identifiers if value == q)), default=0))
+    if name.startswith(q):
+        return (2, len(name) - len(q))
+    if any(value.startswith(q) for value in identifiers):
+        return (3, min((len(value) - len(q) for value in identifiers if value.startswith(q)), default=0))
+    if any(word.startswith(q) for word in name.split()):
+        return (4, len(name) - len(q))
+    if any(q in value for value in identifiers):
+        return (5, min((len(value) - len(q) for value in identifiers if q in value), default=0))
+    if q in name:
+        return (6, len(name) - len(q))
+    if summary.startswith(q):
+        return (7, len(summary) - len(q))
+    if any(word.startswith(q) for word in summary.split()):
+        return (8, len(summary) - len(q))
+    if q in summary:
+        return (9, len(summary) - len(q))
+    if q in description:
+        return (10, len(description) - len(q))
+    return (99, 0)
 
 def _pkg_fallback_icon(pkg: Package) -> str:
     return pkg.icon_fallback_name
@@ -66,7 +120,7 @@ class SearchWorker(QThread):
     Señales:
       packages_found(fuente, lote)  -> AÑADIR lote a esa fuente (streaming)
       source_ready(fuente, lista)   -> REEMPLAZAR la lista de esa fuente
-                                       (caché, FPM/NISSA y AppImage)
+                                       (caché, FPM/PLUTO y AppImage)
       all_done()                    -> todas las fuentes terminaron
     """
     source_ready   = Signal(str, list)
@@ -104,6 +158,28 @@ class SearchWorker(QThread):
                 pass
         return packages
 
+    def _emit_batched(self, source_key: str, packages: List[Package], *,
+                      replace: bool = True) -> None:
+        """Entrega bloques de hasta 200 para no saturar la GUI con listas grandes.
+
+        El primer bloque reemplaza la fuente cuando la respuesta es completa;
+        los bloques siguientes se anexan como resultados de streaming.
+        """
+        if not packages:
+            if replace and not self._stopped():
+                self.source_ready.emit(source_key, [])
+            return
+        for start in range(0, len(packages), _BATCH_MAX):
+            if self._stopped():
+                return
+            batch = packages[start:start + _BATCH_MAX]
+            if source_key in ("flatpak", "xbps"):
+                batch = self._mark_installed(batch)
+            if start == 0 and replace:
+                self.source_ready.emit(source_key, batch)
+            else:
+                self.packages_found.emit(source_key, batch)
+
     def _stream(self, source_key: str, packages, sink: List[Package]) -> None:
         """Consume un iterador de Package emitiendo lotes. `sink` acumula todo
         lo recibido (incluso si el iterador falla a medias). Los `None` son
@@ -140,13 +216,13 @@ class SearchWorker(QThread):
         """
         from backend import appimage_meta
         appimage_meta.apply_cached(packages)
-        self.source_ready.emit("appimage", packages)
+        self._emit_batched("appimage", packages)
         names = appimage_meta.missing_names(packages)
         if not names or self.isInterruptionRequested():
             return
         appimage_meta.fetch_many(names)
         if not self.isInterruptionRequested() and appimage_meta.apply_cached(packages):
-            self.source_ready.emit("appimage", packages)
+            self._emit_batched("appimage", packages)
 
     # fuentes (cada una corre en su propio hilo)
 
@@ -157,7 +233,7 @@ class SearchWorker(QThread):
             return
         cached = search_cache.get("flatpak", q)
         if cached is not None:
-            self.source_ready.emit("flatpak", self._mark_installed(cached))
+            self._emit_batched("flatpak", cached)
             return
         from backend import flatpak_backend
         found: List[Package] = []
@@ -172,7 +248,7 @@ class SearchWorker(QThread):
             search_cache.set_("flatpak", q, found)
 
     def _search_xbps(self, q: str, engine: str) -> bool:
-        """Devuelve True si FPM ya devolvió también los AppImage (NISSA)."""
+        """Devuelve True si FPM ya devolvió también los AppImage (PLUTO)."""
         import core.settings as app_settings
         from core import search_cache
         if not (show_xbps() and app_settings.get_bool("show_xbps")):
@@ -196,7 +272,7 @@ class SearchWorker(QThread):
                 search_cache.set_(cache_source, q, found)
             return False
 
-        # FPM/NISSA valida el flujo completo antes de aceptarlo: llega de una vez.
+        # FPM/PLUTO valida el flujo completo antes de aceptarlo: llega de una vez.
         fpm_used = False
         pkgs: List[Package] = []
         try:
@@ -221,7 +297,7 @@ class SearchWorker(QThread):
             return
         xbps_packages = [p for p in pkgs if p.source != PackageSource.APPIMAGE]
         appimage_packages = [p for p in pkgs if p.source == PackageSource.APPIMAGE]
-        self.source_ready.emit("xbps", self._mark_installed(xbps_packages))
+        self._emit_batched("xbps", xbps_packages)
         if appimage_packages:
             self._emit_appimage(appimage_packages)
 
@@ -232,7 +308,7 @@ class SearchWorker(QThread):
         try:
             from core import search_cache
             from backend import fpm_backend
-            if not fpm_backend.supports_nissa_am_search():
+            if not fpm_backend.supports_pluto_am_search():
                 return
             pkgs = search_cache.get("appimage:am-FUSION", q)
             if pkgs is None:
@@ -261,7 +337,7 @@ class SearchWorker(QThread):
 
         def xbps_then_maybe_appimage():
             fpm_used = self._search_xbps(q, engine)
-            # Con FPM, AppImage solo se pide aparte si NISSA no lo devolvió ya.
+            # Con FPM, AppImage solo se pide aparte si PLUTO no lo devolvió ya.
             if engine == "fpm" and not fpm_used and not self._stopped():
                 self._search_appimage(q)
 
@@ -285,6 +361,11 @@ class SearchWorker(QThread):
 
 # Tarjeta de resultado
 
+_H_GAP = 8
+_V_GAP = 4
+_PAD_V = 10
+
+
 class _ResultCardBase(CardFrame):
     """Lógica común de las tarjetas de resultado (lista y cuadrícula):
     nombre con coincidencias resaltadas, chip de fuente y botón de acción
@@ -301,12 +382,7 @@ class _ResultCardBase(CardFrame):
         return lbl
 
     def _source_chip(self, pkg: Package) -> QWidget:
-        chip = QWidget()
-        chip.setObjectName("cardSourceChip")
-        chip.setStyleSheet(
-            "QWidget#cardSourceChip { background: rgba(100, 116, 139, 42); "
-            "border-radius: 7px; }"
-        )
+        chip = Surface(radius=7.0, tint=0.1, border=0.0)
         lay = QHBoxLayout(chip)
         lay.setContentsMargins(7, 2, 7, 2)
         lbl = QLabel(pkg.source_label)
@@ -327,8 +403,7 @@ class _ResultCardBase(CardFrame):
         if self.pkg.is_installed:
             btn.set_secondary(tr("badge_installed"))
         else:
-            btn.setText(tr("install"))
-            btn.setStyleSheet(CompactInstallButton(tr("install")).styleSheet())
+            btn.set_primary(tr("install"))
 
     def set_installing(self) -> None:
         self._action_btn.setEnabled(False)
@@ -473,7 +548,7 @@ class SearchResultTile(_ResultCardBase):
         self._wire_clicks()
 
 
-class _IconToggleButton(QPushButton):
+class _IconToggleButton(QToolButton):
     """Botón pequeño, marcable, con icono symbolic — usado para las
     opciones de orden y de ancho de tarjeta junto al checkbox de
     'mostrar ocultos'."""
@@ -482,14 +557,11 @@ class _IconToggleButton(QPushButton):
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setObjectName("searchIconToggle")
+        self.setAutoRaise(True)
         self.setToolTip(tooltip)
         self.setFixedSize(28, 28)
         self.setIcon(symbolic_icon(icon_kind, size=16))
         self.setIconSize(QSize(16, 16))
-        # Botón cuadrado solo-icono: el QSS global aplica padding
-        # pensado para botones con texto, así que se recorta aquí.
-        self.setStyleSheet("QPushButton#searchIconToggle { padding: 0px; }")
 
 
 # Página de búsqueda
@@ -521,7 +593,7 @@ class SearchPage(QWidget):
         self._workers: list[SearchWorker] = []
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
-        self._debounce.setInterval(350)
+        self._debounce.setInterval(160)
         self._debounce.timeout.connect(self._run_search)
 
         # Resultados acumulados por fuente
@@ -534,10 +606,10 @@ class SearchPage(QWidget):
         try:
             import core.settings as app_settings
             self._show_hidden = app_settings.get_bool("search_show_hidden")
-            self._sort_mode = app_settings.get("search_sort_mode", "name_asc") or "name_asc"
+            self._sort_mode = app_settings.get("search_sort_mode", "relevance") or "relevance"
         except Exception:
             self._show_hidden = False
-            self._sort_mode = "name_asc"
+            self._sort_mode = "relevance"
 
         # El resumen de resultados se muestra en la barra de estado inferior.
 
@@ -570,7 +642,7 @@ class SearchPage(QWidget):
         if show_appimage():
             try:
                 from backend import fpm_backend
-                if fpm_backend.supports_nissa_am_search():
+                if fpm_backend.supports_pluto_am_search():
                     self._source_combo.addItem(tr("filter_appimage"), "appimage")
                     self._source_modes.append("appimage")
             except Exception:
@@ -606,7 +678,8 @@ class SearchPage(QWidget):
         # Orden como lista desplegable (antes 3 botones de icono).
         self._sort_combo = QComboBox()
         self._sort_combo.setObjectName("searchSortCombo")
-        self._sort_modes = ["name_asc", "name_desc", "source"]
+        self._sort_modes = ["relevance", "name_asc", "name_desc", "source"]
+        self._sort_combo.addItem(tr("search_sort_relevance"))
         self._sort_combo.addItem(tr("search_sort_az"))
         self._sort_combo.addItem(tr("search_sort_za"))
         self._sort_combo.addItem(tr("search_sort_source"))
@@ -685,29 +758,29 @@ class SearchPage(QWidget):
         self._empty.setVisible(False)
         root.addWidget(self._empty, 1)
 
+        # Lista VIRTUALIZADA: no hay layout. Solo existen como widgets las
+        # tarjetas visibles (+ un colchón), colocadas a mano por índice.
         self._results_widget = QWidget()
-        self._results_layout = QGridLayout(self._results_widget)
-        self._results_layout.setContentsMargins(0, 10, 0, 10)
-        self._results_layout.setHorizontalSpacing(8)
-        self._results_layout.setVerticalSpacing(4)
-        # El QGridLayout ocupa todo el viewport del QScrollArea. Sin esta
-        # alineación, cuando hay pocos resultados Qt puede repartirlos o
-        # dejarlos flotando verticalmente en vez de comenzar arriba.
-        self._results_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         scroll.setWidget(self._results_widget)
+        scroll.verticalScrollBar().valueChanged.connect(self._sync_visible)
 
         self._grid_columns = 1 if self._view_mode == "list" else 3
         self._last_results: List[Package] = []
-        self._render_queue: List[Package] = []
-        self._render_index = 0
-        self._rendered_card_count = 0
-        # IDs ya presentes o en cola. Permite añadir respuestas parciales sin
+        self._items: List[Package] = []
+        self._live: dict = {}
+        self._list_row_h = 80
+        self._row_measured = False
+        # IDs ya presentes. Permite añadir respuestas parciales sin
         # destruir las tarjetas que el usuario ya está viendo.
         self._rendered_keys: set[str] = set()
-        self._render_batch_size = 24
-        self._render_timer = QTimer(self)
-        self._render_timer.setInterval(8)
-        self._render_timer.timeout.connect(self._process_render_batch)
+        # Las llegadas parciales se agrupan: filtrar+ordenar miles de
+        # paquetes por cada lote era lo que congelaba la interfaz.
+        self._incr_dirty = False
+        self._last_flush_at = 0.0
+        self._last_flush_dur = 0.0
+        self._incr_timer = QTimer(self)
+        self._incr_timer.setSingleShot(True)
+        self._incr_timer.timeout.connect(self._flush_incremental)
 
     def attach_filter_bar(self, host: QWidget) -> None:
         """Mueve la barra de filtros al contenedor `host` (la fila del
@@ -779,32 +852,85 @@ class SearchPage(QWidget):
         avail = self._viewport_width()
         if self._view_mode == "grid":
             cols = max(1, self._grid_columns)
-            spacing = self._results_layout.horizontalSpacing()
+            spacing = _H_GAP
             return max(1, (int(avail * 0.96) - spacing * (cols - 1)) // cols)
         return max(1, min(avail - 8, max(360, int(avail * 0.60))))
 
     def _reflow(self) -> None:
-        """Adapta en caliente columnas y ancho de las tarjetas ya creadas
-        (sin reconstruirlas) al tamaño actual de la ventana."""
-        self._grid_columns = self._compute_columns()
-        cols = self._grid_columns
-        widgets = []
-        while self._results_layout.count():
-            item = self._results_layout.takeAt(0)
-            if item.widget() is not None:
-                widgets.append(item.widget())
-        width = self._search_card_width()
-        for i, w in enumerate(widgets):
-            row, col = divmod(i, cols)
-            if isinstance(w, _ResultCardBase):
-                w.setFixedWidth(width)
-            self._results_layout.addWidget(w, row, col)
-        for c in range(8):
-            self._results_layout.setColumnStretch(c, 0)
-        self._rendered_card_count = len(widgets)
+        """Adapta columnas y ancho al tamaño actual (solo recoloca las
+        tarjetas vivas; el resto no existe)."""
+        self._apply_geometry()
 
     def _update_search_card_widths(self) -> None:
-        self._reflow()
+        self._apply_geometry()
+
+    def _row_height(self) -> int:
+        return 210 if self._view_mode == "grid" else self._list_row_h
+
+    def _layout_metrics(self):
+        cols = max(1, self._grid_columns)
+        w = self._search_card_width()
+        total_w = cols * w + (cols - 1) * _H_GAP
+        x0 = max(0, (self._viewport_width() - total_w) // 2)
+        pitch = self._row_height() + _V_GAP
+        return cols, w, x0, pitch
+
+    def _apply_geometry(self) -> None:
+        self._grid_columns = self._compute_columns()
+        cols, w, x0, pitch = self._layout_metrics()
+        n = len(self._items)
+        rows = -(-n // cols)
+        total_h = (_PAD_V * 2 + rows * pitch - _V_GAP) if rows else 0
+        if self._results_widget.height() != total_h or self._results_widget.minimumHeight() != total_h:
+            self._results_widget.setFixedHeight(total_h)
+        rh = self._row_height()
+        for idx, card in self._live.items():
+            r, c = divmod(idx, cols)
+            card.setFixedSize(w, rh)
+            card.move(x0 + c * (w + _H_GAP), _PAD_V + r * pitch)
+        self._sync_visible()
+
+    def _sync_visible(self, *_args) -> None:
+        """Crea/destruye tarjetas según lo que está en pantalla."""
+        n = len(self._items)
+        live = self._live
+        if n == 0:
+            for card in live.values():
+                card.hide()
+                card.deleteLater()
+            live.clear()
+            return
+        cols, w, x0, pitch = self._layout_metrics()
+        top = self._scroll.verticalScrollBar().value()
+        vh = self._scroll.viewport().height()
+        buf = 2 if self._view_mode == "grid" else 6
+        first_row = max(0, (top - _PAD_V) // pitch - buf)
+        last_row = (top + vh - _PAD_V) // pitch + buf
+        first = first_row * cols
+        last = min(n, (last_row + 1) * cols)
+        for idx in [i for i in live if i < first or i >= last]:
+            card = live.pop(idx)
+            card.hide()
+            card.deleteLater()
+        rh = self._row_height()
+        parent = self._results_widget
+        for idx in range(first, last):
+            if idx in live:
+                continue
+            card = self._make_card(self._items[idx])
+            card.setParent(parent)
+            if not self._row_measured and self._view_mode == "list":
+                self._row_measured = True
+                h = max(70, min(92, card.sizeHint().height()))
+                if h != self._list_row_h:
+                    self._list_row_h = h
+                    rh = h
+                    QTimer.singleShot(0, self._apply_geometry)
+            r, c = divmod(idx, cols)
+            card.setFixedSize(w, rh)
+            card.move(x0 + c * (w + _H_GAP), _PAD_V + r * pitch)
+            card.show()
+            live[idx] = card
 
     def _set_view_mode(self, mode: str) -> None:
         self._view_list_btn.setChecked(mode == "list")
@@ -858,19 +984,34 @@ class SearchPage(QWidget):
             return
         for k in keys:
             self._installing.pop(k, None)
-        for i in range(self._results_layout.count()):
-            item = self._results_layout.itemAt(i)
-            card = item.widget() if item is not None else None
-            if isinstance(card, _ResultCardBase) and self._package_key(card.pkg) in keys:
-                if success:
-                    from backend.models import PackageStatus
-                    card.pkg.status = PackageStatus.INSTALLED
+        if success:
+            from backend.models import PackageStatus
+            for pkg in self._items:
+                if self._package_key(pkg) in keys:
+                    pkg.status = PackageStatus.INSTALLED
+        for card in self._cards():
+            if self._package_key(card.pkg) in keys:
                 card.refresh_action()
 
     # API pública
 
     def trigger_search(self, query: str):
-        self._last_query = query
+        query = query or ""
+        if query != self._last_query:
+            self._last_query = query
+            if self._worker is not None:
+                self._worker.requestInterruption()
+                self._worker = None
+            self._results_by_source.clear()
+            self._last_results = []
+            self._search_active = bool(query.strip())
+            self._clear_results()
+            self._set_empty_visible(False)
+            if self._search_active:
+                self._loading_bar.start()
+            else:
+                self._loading_bar.stop()
+            self._emit_summary(0)
         self._debounce.start()
 
     def force_search(self):
@@ -979,17 +1120,17 @@ class SearchPage(QWidget):
         worker.start()
 
     def _on_source_ready_from(self, worker, source_key: str, packages: List[Package]):
-        if worker is not self._worker:
+        if worker is not self._worker or worker._query != self._last_query.strip():
             return
         self._on_source_ready(source_key, packages)
 
     def _on_packages_found_from(self, worker, source_key: str, batch: List[Package]):
-        if worker is not self._worker:
+        if worker is not self._worker or worker._query != self._last_query.strip():
             return
         self._on_packages_found(source_key, batch)
 
     def _on_all_done_from(self, worker):
-        if worker is not self._worker:
+        if worker is not self._worker or worker._query != self._last_query.strip():
             return
         self._on_all_done()
 
@@ -1019,7 +1160,7 @@ class SearchPage(QWidget):
         # Se guarda sin filtrar por blacklist: el filtro se aplica en
         # _filter_results según el estado del toggle "mostrar ocultos",
         # así activarlo/desactivarlo no exige repetir la búsqueda.
-        self._results_by_source[source_key] = packages
+        self._results_by_source[source_key] = dedupe_xbps(packages)
 
         # Añadir únicamente lo nuevo. Antes se llamaba a _rerender(), que
         # borraba todas las tarjetas y reconstruía la página cada vez que
@@ -1030,7 +1171,8 @@ class SearchPage(QWidget):
     def _on_packages_found(self, source_key: str, batch: List[Package]):
         """Llega un lote de paquetes de una fuente que sigue buscando: se
         añaden a la lista al instante, sin esperar a que la fuente termine."""
-        self._results_by_source.setdefault(source_key, []).extend(batch)
+        current = self._results_by_source.setdefault(source_key, [])
+        current.extend(dedupe_xbps(batch, xbps_keys(current)))
         self._render_incremental(source_key)
 
     @Slot()
@@ -1038,7 +1180,9 @@ class SearchPage(QWidget):
         """Todas las fuentes terminaron."""
         self._loading_bar.stop()
         self._search_active = False
-        self._render_incremental()
+        self._incr_timer.stop()
+        self._incr_dirty = True
+        self._flush_incremental()
         self._settle_order()
         self._set_empty_visible(
             not self._last_results and bool(self._last_query.strip()),
@@ -1056,14 +1200,32 @@ class SearchPage(QWidget):
 
     def _apply_hidden_filter(self, results: List[Package]) -> List[Package]:
         """Quita los paquetes de la blacklist, salvo que el usuario haya
-        activado 'mostrar paquetes ocultos'."""
+        activado 'mostrar paquetes ocultos'. El veredicto se memoriza en
+        cada paquete (evita repetir cientos de fnmatch por lote)."""
         if self._show_hidden:
             return results
         try:
-            from backend.blacklist import filter_packages
-            return filter_packages(results)
+            from backend.blacklist import is_blacklisted, blacklist_revision
+            revision = blacklist_revision()
         except Exception:
             return results
+        out = []
+        for p in results:
+            cached = getattr(p, "_blacklist_cache", None)
+            if cached is not None and cached[0] == revision:
+                hidden = cached[1]
+            else:
+                try:
+                    hidden = bool(is_blacklisted(p))
+                except Exception:
+                    hidden = False
+                try:
+                    p._blacklist_cache = (revision, hidden)
+                except Exception:
+                    pass
+            if not hidden:
+                out.append(p)
+        return out
 
     def _filter_results(self, results: List[Package]) -> List[Package]:
         if self._active_source == "flatpak":
@@ -1072,6 +1234,12 @@ class SearchPage(QWidget):
             results = [p for p in results if p.source.value == "xbps"]
         elif self._active_source == "appimage":
             results = [p for p in results if p.source == PackageSource.APPIMAGE]
+        try:
+            import core.settings as app_settings
+            if app_settings.get_bool("omit_multilib"):
+                results = [p for p in results if not p.is_32bit]
+        except Exception:
+            pass
         results = self._apply_hidden_filter(results)
         # No ocultar variantes en la búsqueda: cada fuente permanece visible
         # como resultado propio. Solo se enlazan entre sí para que el detalle
@@ -1082,11 +1250,19 @@ class SearchPage(QWidget):
     @staticmethod
     def _duplicate_aliases(pkg: Package) -> tuple[str, ...]:
         """Alias de identidad que suelen variar entre catálogos."""
+        cached = getattr(pkg, "_alias_cache", None)
+        if cached is not None:
+            return cached
         values = (pkg.appstream_id, pkg.pkgname, pkg.name)
-        return tuple(
+        result = tuple(
             alias for value in values
             if (alias := re.sub(r"[^a-z0-9]+", "", (value or "").casefold()))
         )
+        try:
+            pkg._alias_cache = result
+        except Exception:
+            pass
+        return result
 
     def _attach_source_variants(self, results: List[Package]) -> None:
         """Enlaza variantes sin eliminarlas de la lista de búsqueda."""
@@ -1113,9 +1289,9 @@ class SearchPage(QWidget):
                 package._source_variants = source_variants
 
     def _apply_sort(self, results: List[Package]) -> List[Package]:
-        """Ordena alfabéticamente (asc/desc) o agrupa por fuente
-        (Flatpak / XBPS), manteniendo orden alfabético como criterio
-        secundario dentro de cada fuente."""
+        """Prioriza coincidencias exactas o aplica el orden manual elegido."""
+        if self._sort_mode == "relevance":
+            return sorted(results, key=lambda p: _relevance_key(p, self._last_query))
         if self._sort_mode == "name_desc":
             return sorted(results, key=lambda p: p.name.lower(), reverse=True)
         elif self._sort_mode == "source":
@@ -1163,16 +1339,15 @@ class SearchPage(QWidget):
         self._render_results(filtered)
 
     def _clear_results(self):
-        self._render_timer.stop()
-        self._render_queue.clear()
-        self._render_index = 0
-        self._rendered_card_count = 0
+        self._incr_timer.stop()
+        self._incr_dirty = False
+        self._items = []
+        for card in self._live.values():
+            card.hide()
+            card.deleteLater()
+        self._live.clear()
         self._rendered_keys.clear()
-        while self._results_layout.count():
-            item = self._results_layout.takeAt(0)
-            if item.widget():
-                item.widget().hide()   # que no se vea mientras llega el deleteLater
-                item.widget().deleteLater()
+        self._results_widget.setFixedHeight(0)
 
     def _set_empty_visible(self, empty: bool, query: str = "") -> None:
         if empty:
@@ -1186,13 +1361,12 @@ class SearchPage(QWidget):
         self._clear_results()
         query = self._last_query.strip()
         self._set_empty_visible(not results and bool(query) and not self._search_active, query)
-        # Mantener la lista completa para el conteo y el orden, pero crear solo
-        # una ventana inicial de tarjetas. Esto evita que una consulta amplia
-        # convierta la GUI en miles de QWidget y provoque congelamientos.
-        self._render_queue = list(results)
-        self._rendered_keys = {self._package_key(pkg) for pkg in self._render_queue}
-        if self._render_queue:
-            self._render_timer.start()
+        # La lista completa se conserva para conteo y orden, pero solo se
+        # crean widgets para lo visible (ver _sync_visible).
+        self._items = list(results)
+        self._rendered_keys = {self._package_key(pkg) for pkg in self._items}
+        self._scroll.verticalScrollBar().setValue(0)
+        self._apply_geometry()
 
     @staticmethod
     def _package_key(pkg: Package) -> str:
@@ -1201,32 +1375,54 @@ class SearchPage(QWidget):
         return f"{pkg.source.value}:{package_id}"
 
     def _render_incremental(self, source_key: str | None = None) -> None:
-        """Encola solo apps nuevas, sin reiniciar ni duplicar la lista.
+        """Marca datos nuevos y refresca con throttle adaptativo: el primer
+        lote se ve al instante y el intervalo crece con el coste del último
+        refresco (4×), así listas enormes nunca saturan el hilo de la GUI."""
+        self._incr_dirty = True
+        if self._incr_timer.isActive():
+            return
+        gap = max(0.05, 4.0 * self._last_flush_dur)
+        wait = gap - (time.monotonic() - self._last_flush_at)
+        if wait <= 0:
+            self._flush_incremental()
+        else:
+            self._incr_timer.start(int(wait * 1000) + 1)
 
-        La fuente que acaba de responder no se representa como una tarjeta
-        adicional: las variantes se conservan en el paquete único y se
-        muestran al abrir su detalle.
-        """
+    def _flush_incremental(self) -> None:
+        if not self._incr_dirty:
+            return
+        self._incr_dirty = False
+        t_start = time.monotonic()
         all_results = self._get_all_results()
         filtered = self._filter_results(all_results)
         self._last_results = filtered
         self._emit_summary(len(filtered))
 
-        # Todas las variantes permanecen visibles; solo se evita repetir la
-        # misma tarjeta cuando un backend vuelve a emitir el mismo resultado.
-        for pkg in filtered:
-            key = self._package_key(pkg)
-            if key in self._rendered_keys:
-                continue
-            self._rendered_keys.add(key)
-            self._render_queue.append(pkg)
+        # Reordenar también durante el streaming: una coincidencia exacta que
+        # llegue después puede subir de inmediato, sin esperar a todas las
+        # fuentes. Se conservan las tarjetas ya visibles por clave de paquete.
+        scroll_value = self._scroll.verticalScrollBar().value()
+        self._items = list(filtered)
+        self._rendered_keys = {self._package_key(pkg) for pkg in self._items}
+        new_indices = {self._package_key(pkg): i for i, pkg in enumerate(self._items)}
+        old_live = list(self._live.values())
+        self._live.clear()
+        for card in old_live:
+            new_index = new_indices.get(self._package_key(card.pkg))
+            if new_index is None:
+                card.hide()
+                card.deleteLater()
+            else:
+                self._live[new_index] = card
 
         self._set_empty_visible(
             not filtered and bool(self._last_query.strip()) and not self._search_active,
             self._last_query.strip(),
         )
-        if self._render_queue and not self._render_timer.isActive():
-            self._render_timer.start()
+        self._apply_geometry()
+        self._scroll.verticalScrollBar().setValue(scroll_value)
+        self._last_flush_at = time.monotonic()
+        self._last_flush_dur = self._last_flush_at - t_start
 
     def _settle_order(self) -> None:
         """Al terminar, deja las tarjetas en el orden elegido (A-Z, Z-A, fuente).
@@ -1235,38 +1431,10 @@ class SearchPage(QWidget):
         se desplazó por la lista no se toca nada, para no moverle el suelo."""
         if self._search_active or self._scroll.verticalScrollBar().value() > 0:
             return
-        if self._render_queue:     # aún se están creando tarjetas: reintentar
-            gen = self._search_generation
-            QTimer.singleShot(120, lambda: gen == self._search_generation and self._settle_order())
-            return
-        shown = [self._package_key(c.pkg) for c in self._cards()]
+        shown = [self._package_key(p) for p in self._items]
         wanted = [self._package_key(p) for p in self._last_results]
         if shown and wanted and shown != wanted:
             self._rerender()
 
     def _cards(self) -> list:
-        out = []
-        for i in range(self._results_layout.count()):
-            item = self._results_layout.itemAt(i)
-            w = item.widget() if item is not None else None
-            if isinstance(w, _ResultCardBase):
-                out.append(w)
-        return out
-
-    def _process_render_batch(self) -> None:
-        """Crea unas pocas tarjetas por turno para mantener fluida la GUI."""
-        cols = max(1, self._grid_columns)
-        end = min(self._render_index + self._render_batch_size, len(self._render_queue))
-        for i in range(self._render_index, end):
-            pkg = self._render_queue[i]
-            card = self._make_card(pkg)
-            row, col = divmod(self._rendered_card_count, cols)
-            card.setFixedWidth(self._search_card_width())
-            self._results_layout.addWidget(card, row, col)
-            self._rendered_card_count += 1
-        self._render_index = end
-        if self._render_index >= len(self._render_queue):
-            self._render_timer.stop()
-            self._render_queue.clear()
-            self._render_index = 0
-            self._update_search_card_widths()
+        return list(self._live.values())

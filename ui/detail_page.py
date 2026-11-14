@@ -5,7 +5,7 @@ from __future__ import annotations
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize
-from PySide6.QtGui import QColor, QTextCursor, QTextBlockFormat, QTextCharFormat, QPixmap
+from PySide6.QtGui import QColor, QTextCursor, QTextBlockFormat, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QFrame, QSizePolicy, QTextBrowser, QComboBox, QPushButton,
@@ -16,6 +16,7 @@ from backend.models import Package, PackageSource, PackageStatus, TaskType
 from backend.task_manager import TaskManager
 from .icon_widget import AppIconWidget
 from .native_widgets import BadgeLabel, InstallButton, RemoveButton, UpdateButton, BackButton
+from .theme import TintedLabel, semantic_color
 
 
 def _pkg_fallback_icon(pkg: Package) -> str:
@@ -262,14 +263,12 @@ class AppDetailPage(QWidget):
         self._summary_lbl.setWordWrap(True)
         self._content_layout.addWidget(self._summary_lbl)
 
-        self._arch_warning_lbl = QLabel(tr("warning_32bit"))
+        self._arch_warning_lbl = TintedLabel(tr("warning_32bit"), radius=4.0, tint=0.11,
+                                             border=0.0, left_bar=True)
         self._arch_warning_lbl.setObjectName("architectureWarning")
         self._arch_warning_lbl.setWordWrap(True)
-        self._arch_warning_lbl.setStyleSheet(
-            "QLabel#architectureWarning { color: #B45309; "
-            "background-color: rgba(217, 119, 6, 28); "
-            "border-left: 3px solid #D97706; border-radius: 4px; padding: 8px; }"
-        )
+        self._arch_warning_lbl.setContentsMargins(11, 8, 8, 8)
+        self._arch_warning_lbl.set_tint_color(semantic_color("warning", self._arch_warning_lbl))
         self._arch_warning_lbl.setVisible(False)
         self._content_layout.addWidget(self._arch_warning_lbl)
 
@@ -537,15 +536,13 @@ class AppDetailPage(QWidget):
             return
 
         for url in urls:
-            tile = QLabel(tr("details_screenshot_loading"))
+            tile = TintedLabel(tr("details_screenshot_loading"), radius=8.0, tint=0.08,
+                               border=0.25, dashed=True)
+            tile.setContentsMargins(6, 6, 6, 6)
             tile.setObjectName("detailScreenshotTile")
             tile.setAlignment(Qt.AlignCenter)
             tile.setFixedSize(220, 144)
             tile.setWordWrap(True)
-            tile.setStyleSheet(
-                "QLabel#detailScreenshotTile { border: 1px dashed rgba(120,130,145,150); "
-                "border-radius: 8px; background: rgba(120,130,145,24); padding: 6px; }"
-            )
             self._screenshot_strip_layout.addWidget(tile)
             self._screenshot_tiles[url] = tile
 
@@ -571,7 +568,8 @@ class AppDetailPage(QWidget):
             return
         target = QSize(tile.width() - 12, tile.height() - 12)
         tile.setText("")
-        tile.setStyleSheet("QLabel#detailScreenshotTile { border: 0; background: transparent; }")
+        tile.set_plain(True)
+        tile.setContentsMargins(0, 0, 0, 0)
         tile.setPixmap(pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _retire_screenshot_worker(self, worker: _ScreenshotWorker) -> None:
@@ -649,10 +647,6 @@ class AppDetailPage(QWidget):
             except TypeError:
                 continue
         cursor.setBlockFormat(block_fmt)
-
-        char_fmt = QTextCharFormat()
-        char_fmt.setForeground(QColor("#7A8C5E"))
-        cursor.setCharFormat(char_fmt)
 
         cursor.insertText(description or "")
         self._desc_browser.setTextCursor(cursor)

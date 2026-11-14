@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List
 
 from PySide6.QtCore import Qt, Signal, QThread, Slot, QTimer, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QIcon, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QFrame, QStackedWidget,
@@ -18,6 +18,7 @@ from backend.models import Package, PackageSource, TaskType
 from backend.task_manager import TaskManager
 from backend.system_detect import show_xbps, show_flatpak, show_appimage
 from .icon_widget import AppIconWidget
+from .theme import scaled_font
 from .chibi_widget import ChibiPlaceholder
 from .native_widgets import (
     BadgeLabel, CardFrame, GhostRemoveButton, MultilineElideLabel,
@@ -292,19 +293,19 @@ class InstalledPage(QWidget):
         # pero se conserva por si se necesita reactivar más adelante.
         self._view_mode = "list"
 
+        # Lista VIRTUALIZADA: _row_widgets solo contiene las filas que están
+        # en pantalla (+ colchón); el resto de paquetes no tiene widgets.
+        self._visible_pkgs: List[Package] = []
+        self._index_of: dict[tuple, int] = {}
+        self._row_h = 64
+        self._row_measured = False
+        self._removing: set[tuple] = set()
+        self._apply_pending = False
+
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
-        self._filter_timer.setInterval(250)
+        self._filter_timer.setInterval(120)
         self._filter_timer.timeout.connect(self._apply_filter)
-
-        # Cola de creación de widgets, procesada en tandas pequeñas (ver
-        # _process_create_queue) para que agregar muchas apps de golpe
-        # (primer arranque sin caché, o una fuente grande como XBPS) no
-        # trabe la interfaz creando cientos de tarjetas de una sola vez.
-        self._create_queue: List[Package] = []
-        self._create_timer = QTimer(self)
-        self._create_timer.setInterval(0)
-        self._create_timer.timeout.connect(self._process_create_queue)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 16, 20, 20)
@@ -383,7 +384,6 @@ class InstalledPage(QWidget):
 
         if show_appimage():
             add_ai_btn = QPushButton(tr("add_appimage_btn"))
-            add_ai_btn.setObjectName("installedAddAppImage")
             add_ai_btn.setCursor(Qt.PointingHandCursor)
             add_ai_btn.setFixedHeight(32)
             icon = QIcon.fromTheme("list-add-symbolic", QIcon.fromTheme("list-add"))
@@ -391,16 +391,10 @@ class InstalledPage(QWidget):
                 add_ai_btn.setIcon(icon)
             else:
                 from .native_widgets import symbolic_icon
-                from PySide6.QtGui import QColor
-                add_ai_btn.setIcon(symbolic_icon("plus", color=QColor("#FFFFFF"), size=16))
+                add_ai_btn.setIcon(symbolic_icon(
+                    "plus", color=add_ai_btn.palette().color(QPalette.ButtonText), size=16))
                 add_ai_btn.setText(" " + tr("add_appimage_btn"))
-            add_ai_btn.setStyleSheet(
-                "QPushButton#installedAddAppImage { background: palette(highlight); "
-                "color: palette(highlighted-text); border: none; border-radius: 8px; "
-                "padding: 0 14px; font-weight: bold; }"
-                "QPushButton#installedAddAppImage:hover { background: palette(highlight); "
-                "border: 2px solid rgba(255,255,255,70); }"
-            )
+            add_ai_btn.setFont(scaled_font(add_ai_btn.font(), bold=True))
             add_ai_btn.clicked.connect(self._on_add_appimage)
             bar_lay.addWidget(add_ai_btn)
         root.addWidget(bar)
@@ -418,12 +412,7 @@ class InstalledPage(QWidget):
         list_scroll.setWidgetResizable(True)
         list_scroll.setFrameShape(QFrame.NoFrame)
 
-        self._list = QWidget()
-        self._list_layout = QVBoxLayout(self._list)
-        self._list_layout.setContentsMargins(0, 0, 0, 0)
-        self._list_layout.setSpacing(4)
-        self._list_layout.addStretch()
-
+        self._list = QWidget()   # sin layout: filas colocadas a mano
         # Las tarjetas ocupan el 60% del ancho disponible, centradas
         # horizontalmente (antes iban de borde a borde). self._list
         # recibe un ancho fijo recalculado en resizeEvent; los stretch
@@ -432,10 +421,11 @@ class InstalledPage(QWidget):
         list_wrap_layout = QHBoxLayout(list_wrap)
         list_wrap_layout.setContentsMargins(0, 0, 0, 0)
         list_wrap_layout.addStretch(1)
-        list_wrap_layout.addWidget(self._list)
+        list_wrap_layout.addWidget(self._list, 0, Qt.AlignTop)
         list_wrap_layout.addStretch(1)
         list_scroll.setWidget(list_wrap)
         self._list_scroll = list_scroll
+        list_scroll.verticalScrollBar().valueChanged.connect(self._sync_rows)
 
         # Vista de cuadrícula (4 columnas)
         grid_scroll = QScrollArea()
@@ -522,7 +512,7 @@ class InstalledPage(QWidget):
             parts.append("Flatpak")
         if show_xbps()    and app_settings.get_bool("show_xbps"):
             self._pending_sources.add("xbps")
-            parts.append("XBPS")
+            parts.append("CuerdOS (Sistema)")
         if show_appimage():
             self._pending_sources.add("appimage")
             parts.append("AppImage")
@@ -588,6 +578,10 @@ class InstalledPage(QWidget):
     @Slot(str, bool, str)
     def _on_task_completed(self, task_id: str, success: bool, _msg: str):
         task = self._tm._tasks.get(task_id)
+        if task and task.task_type == TaskType.REMOVE:
+            self._removing.clear()
+            if not success:
+                self._reset_live_rows()   # restaura el botón "Quitar"
         if task and task.task_type in (TaskType.REMOVE, TaskType.INSTALL) and success:
             # Invalidar la caché de búsquedas: una instalación/desinstalación
             # puede cambiar el tamaño (installed_size cambia tras instalar)
@@ -622,26 +616,28 @@ class InstalledPage(QWidget):
                 self._source_combo.blockSignals(False)
         if hasattr(self, "_source_seg"):
             self._source_seg.set_current(key)
-        self._show_filtering()
+        self._apply_filter()
 
     def _on_search_changed(self, text: str):
         self._search_query = text.strip().lower()
         self._show_filtering()
 
     def _show_filtering(self):
-        """Hide the list and show a loading animation while the filter is
-        (re)applied, restarting the debounce on every keystroke/click."""
-        self._content_stack.setCurrentWidget(self._filter_loading)
-        # Force the loading screen to paint before we schedule the filter work
-        self._content_stack.repaint()
+        """Reinicia el debounce del filtro (sin pantalla de carga: filtrar
+        ya no recrea widgets)."""
         self._filter_timer.start()
 
     def _apply_filter(self):
-        """Show/hide existing rows according to current filter/search —
-        never recreates widgets, so it stays smooth on rapid input.
-        We do the heavy work in a singleShot so the loading animation
-        has at least one full paint cycle before the list re-appears."""
-        QTimer.singleShot(80, self._do_apply_filter)
+        """Refresca la vista según filtro/búsqueda. Llamadas repetidas se
+        agrupan en una sola; ya no se recrean widgets, así que es instantáneo."""
+        if self._apply_pending:
+            return
+        self._apply_pending = True
+        QTimer.singleShot(0, self._run_apply)
+
+    def _run_apply(self):
+        self._apply_pending = False
+        self._do_apply_filter()
 
     def _filtered(self) -> List[Package]:
         pkgs = self._all_pkgs
@@ -720,17 +716,22 @@ class InstalledPage(QWidget):
         self.show_search()
 
     def _do_apply_filter(self):
-        visible_pkgs = self._filtered()
-        visible_keys = {_pkg_key(p) for p in visible_pkgs}
+        visible_pkgs = []
+        seen = set()
+        for p in self._filtered():
+            k = _pkg_key(p)
+            if k not in seen:
+                seen.add(k)
+                visible_pkgs.append(p)
+        visible_keys = seen
         self._update_summary(visible_pkgs)
 
+        self._visible_pkgs = visible_pkgs
+        self._index_of = {_pkg_key(p): i for i, p in enumerate(visible_pkgs)}
         if self._view_mode == "grid":
             self._layout_grid(visible_pkgs, visible_keys)
         else:
-            self._list.setUpdatesEnabled(False)
-            for key, row in self._row_widgets.items():
-                row.setVisible(key in visible_keys)
-            self._list.setUpdatesEnabled(True)
+            self._apply_list_geometry()
 
         if not visible_pkgs:
             self._empty_state.set_texts(self._empty_state_text())
@@ -808,9 +809,7 @@ class InstalledPage(QWidget):
 
         for idx, pkg in enumerate(visible_pkgs):
             key = _pkg_key(pkg)
-            tile = self._tile_widgets.get(key)
-            if tile is None:
-                continue
+            tile = self._tile_widgets.get(key) or self._make_tile(pkg)
             row, col = divmod(idx, self._grid_columns)
             self._grid_layout.addWidget(tile, row, col)
 
@@ -836,103 +835,101 @@ class InstalledPage(QWidget):
                 except Exception:
                     pass
                 return
+        self._removing.add(_pkg_key(pkg))
         self._tm.submit(pkg, TaskType.REMOVE)
 
     def _reconcile_rows(self):
-        """Quita widgets de paquetes que ya no existen (desinstalados) y
-        encola la creación de los nuevos, procesada en tandas pequeñas
-        por _process_create_queue para no trabar la GUI cuando hay muchos
-        de golpe (primer arranque sin caché, o una fuente grande)."""
+        """Ya no se crean widgets por paquete (lista virtualizada). Solo se
+        descartan tarjetas de cuadrícula obsoletas. Devuelve False para que
+        el llamador refresque el filtro."""
         current_keys = {_pkg_key(p) for p in self._all_pkgs}
-
-        for key in list(self._row_widgets.keys()):
-            if key not in current_keys:
-                row = self._row_widgets.pop(key)
-                self._list_layout.removeWidget(row)
-                row.deleteLater()
         for key in list(self._tile_widgets.keys()):
             if key not in current_keys:
                 tile = self._tile_widgets.pop(key)
                 self._grid_layout.removeWidget(tile)
                 tile.deleteLater()
+        return False
 
-        pending_keys = {_pkg_key(p) for p in self._create_queue}
-        for pkg in self._all_pkgs:
+    def _make_row(self, pkg: Package) -> "InstalledRow":
+        row = InstalledRow(pkg)
+        row.open_detail.connect(self.app_selected)
+        row.remove_requested.connect(
+            lambda p, w=row: self._confirm_and_remove(p, w)
+        )
+        if _pkg_key(pkg) in self._removing:
+            row._remove_btn.set_busy(tr("removing"))
+        return row
+
+    def _make_tile(self, pkg: Package) -> "InstalledTile":
+        tile = InstalledTile(pkg)
+        tile.open_detail.connect(self.app_selected)
+        tile.remove_requested.connect(
+            lambda p, w=tile: self._confirm_and_remove(p, w)
+        )
+        self._tile_widgets[_pkg_key(pkg)] = tile
+        return tile
+
+    def _apply_list_geometry(self) -> None:
+        pitch = self._row_h + 4
+        n = len(self._visible_pkgs)
+        h = n * pitch - 4 if n else 0
+        if self._list.height() != h or self._list.minimumHeight() != h:
+            self._list.setFixedHeight(h)
+        w = self._list.width()
+        for key, row in self._row_widgets.items():
+            i = self._index_of.get(key)
+            if i is None:
+                continue
+            row.setFixedSize(w, self._row_h)
+            row.move(0, i * pitch)
+        self._sync_rows()
+
+    def _sync_rows(self, *_args) -> None:
+        """Crea/destruye filas según lo que se ve en pantalla."""
+        pkgs = self._visible_pkgs
+        live = self._row_widgets
+        n = len(pkgs)
+        pitch = self._row_h + 4
+        top = self._list_scroll.verticalScrollBar().value()
+        vh = self._list_scroll.viewport().height()
+        first = max(0, top // pitch - 6)
+        last = min(n, (top + vh) // pitch + 7)
+        wanted = {_pkg_key(pkgs[i]) for i in range(first, last)}
+        for key in [k for k in live if k not in wanted]:
+            row = live.pop(key)
+            row.hide()
+            row.deleteLater()
+        w = self._list.width()
+        for i in range(first, last):
+            pkg = pkgs[i]
             key = _pkg_key(pkg)
-            if key not in self._row_widgets and key not in pending_keys:
-                self._create_queue.append(pkg)
-                pending_keys.add(key)
-
-        if self._create_queue and not self._create_timer.isActive():
-            self._create_timer.start()
-            return True  # hay tarjetas nuevas encolándose
-
-        return False  # nada que crear: se puede refrescar el filtro ya
-
-    def _process_create_queue(self, batch_size: int = 12):
-        """Crea hasta 'batch_size' filas/tarjetas por tick del timer,
-        cediendo el control al event loop entre tandas. A propósito NO
-        oculta la lista/grid real detrás de la pantalla de carga mientras
-        crea: ocultarla hacía que Qt no recalculara bien el layout al
-        revelarla de nuevo, dejando la vista vacía hasta cambiar de
-        pestaña y volver. El progreso se muestra en la etiqueta de
-        estado en su lugar."""
-        total = len(self._all_pkgs)
-        for _ in range(batch_size):
-            if not self._create_queue:
-                self._create_timer.stop()
-                break
-            pkg = self._create_queue.pop(0)
-            key = _pkg_key(pkg)
-            if key in self._row_widgets:
-                continue  # ya creada (ej. re-encolada por una recarga)
-
+            if key in live:
+                continue
             try:
-                row = InstalledRow(pkg)
-                row.open_detail.connect(self.app_selected)
-                row.remove_requested.connect(
-                    lambda p, w=row: self._confirm_and_remove(p, w)
-                )
-                self._row_widgets[key] = row
-                self._list_layout.insertWidget(self._list_layout.count() - 1, row)
-
-                tile = InstalledTile(pkg)
-                tile.open_detail.connect(self.app_selected)
-                tile.remove_requested.connect(
-                    lambda p, w=tile: self._confirm_and_remove(p, w)
-                )
-                self._tile_widgets[key] = tile
-                tile.setVisible(False)  # se coloca/muestra en _layout_grid
+                row = self._make_row(pkg)
             except Exception:
-                # Un paquete puntual con datos inválidos no debe tumbar el
-                # resto de la tanda ni el timer; se descarta y se sigue.
                 import traceback
                 traceback.print_exc()
-                self._row_widgets.pop(key, None)
-                self._tile_widgets.pop(key, None)
                 continue
+            row.setParent(self._list)
+            if not self._row_measured:
+                self._row_measured = True
+                h = max(56, min(72, row.sizeHint().height()))
+                if h != self._row_h:
+                    self._row_h = h
+                    pitch = h + 4
+                    QTimer.singleShot(0, self._apply_list_geometry)
+            row.setFixedSize(w, self._row_h)
+            row.move(0, i * pitch)
+            row.show()
+            live[key] = row
 
-        remaining = len(self._create_queue)
-        if remaining:
-            done = max(total - remaining, 0)
-            if self._sources_done:
-                # Las apps ya fueron cargadas; solo quedan widgets por pintar.
-                # No mostrar un "cargando" engañoso: el recuento vive en el
-                # resumen de la barra local.
-                self._status_lbl.setVisible(False)
-            else:
-                progress_text = tr("installed_loading_progress", done=done, total=total)
-                self._status_lbl.setText(progress_text)
-                self._status_lbl.setToolTip(progress_text)
-        else:
-            self._create_timer.stop()
-            # Recién ahora, con todas las tarjetas creadas, se hace un
-            # único layout/filtrado (antes se hacía en cada tanda y el
-            # grid "parpadeaba" al reordenarse de a poco).
-            self._apply_filter()
-            self._status_lbl.setToolTip("")
-            if self._sources_done:
-                self._status_lbl.setVisible(False)
+    def _reset_live_rows(self) -> None:
+        for row in self._row_widgets.values():
+            row.hide()
+            row.deleteLater()
+        self._row_widgets.clear()
+        self._sync_rows()
 
     def showEvent(self, event):
         """Al volver a esta página, Qt a veces deja el grid/lista con un
@@ -943,8 +940,7 @@ class InstalledPage(QWidget):
         terminar, ver _process_create_queue)."""
         super().showEvent(event)
         self._update_list_width()
-        if not self._create_timer.isActive():
-            self._apply_filter()
+        self._apply_filter()
 
     def _update_list_width(self, page_width: int | None = None) -> None:
         """Fija el ancho de las tarjetas de la vista de lista al 60% del
@@ -955,6 +951,8 @@ class InstalledPage(QWidget):
         if page_width <= 0:
             return
         self._list.setFixedWidth(max(int(page_width * 0.6), GRID_TILE_MIN_WIDTH))
+        self._apply_list_geometry()
+        QTimer.singleShot(0, self._sync_rows)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
